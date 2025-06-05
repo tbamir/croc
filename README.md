@@ -1,296 +1,167 @@
-<p align="center">
-  <img src="https://user-images.githubusercontent.com/6550035/46709024-9b23ad00-cbf6-11e8-9fb2-ca8b20b7dbec.jpg" width="408px" border="0" alt="croc">
-  <br>
-  <a href="https://github.com/schollz/croc/releases/latest">
-    <img src="https://img.shields.io/github/v/release/schollz/croc" alt="Version">
-  </a>
-  <a href="https://github.com/schollz/croc/actions/workflows/ci.yml">
-    <img src="https://github.com/schollz/croc/actions/workflows/ci.yml/badge.svg" alt="Build Status">
-  </a>
-</p>
-<p align="center">
-  This project is supported by <a href="https://github.com/sponsors/schollz">GitHub sponsors</a>.
-</p>
+# TrustDrop
 
-## About
+A secure peer-to-peer file transfer application built with Go.
 
-`croc` is a tool that allows any two computers to simply and securely transfer files and folders. AFAIK, *croc* is the only CLI file-transfer tool that does **all** of the following:
+## Overview
 
-- Allows **any two computers** to transfer data (using a relay)
-- Provides **end-to-end encryption** (using PAKE)
-- Enables easy **cross-platform** transfers (Windows, Linux, Mac)
-- Allows **multiple file** transfers
-- Allows **resuming transfers** that are interrupted
-- No need for local server or port-forwarding
-- **IPv6-first** with IPv4 fallback
-- Can **use a proxy**, like Tor
+TrustDrop enables secure peer-to-peer file transfers with strong encryption and no reliance on external servers for storage. Files are transferred directly between peers using the proven croc protocol with a simple, intuitive desktop GUI.
 
-For more information about `croc`, see [my blog post](https://schollz.com/tinker/croc6/) or read a [recent interview I did](https://console.substack.com/p/console-91).
+**Key Features:**
+- Secure peer-to-peer connection using croc protocol
+- End-to-end encryption for all transferred files
+- TLS transmission with certificate verification
+- Simple and intuitive desktop user interface
+- Cross-platform support (macOS and Windows)
+- Transfer audit logging
+- Support for large file transfers (20,000+ files, terabytes of data)
+- Automatic retry and resume capabilities
 
-![Example](src/install/customization.gif)
+## Installation
 
-## Install
+### Prerequisites
+- Go 1.24 or higher
+- Git
 
-You can download [the latest release for your system](https://github.com/schollz/croc/releases/latest), or install a release from the command-line:
+### Building from Source
 
+1. Clone the repository:
 ```bash
-curl https://getcroc.schollz.com | bash
+git clone <repository-url>
+cd trustdrop
 ```
 
-### On macOS
-
-Using [Homebrew](https://brew.sh/):
-
+2. Build the application:
 ```bash
-brew install croc
+go build
 ```
 
-Using [MacPorts](https://www.macports.org/):
-
+3. Run the application:
 ```bash
-sudo port selfupdate
-sudo port install croc
+./trustdrop
 ```
 
-### On Windows
+## Usage Guide
 
-You can install the latest release with [Scoop](https://scoop.sh/), [Chocolatey](https://chocolatey.org/), or [Winget](https://learn.microsoft.com/windows/package-manager/):
+### Connecting to Peers
 
-```bash
-scoop install croc
+1. **Share your Peer ID**:
+   - Generate a unique peer ID (code phrase) to share with your recipient
+   - Share it via a secure channel (e.g., messaging app, email)
+
+2. **Connect to a Peer**:
+   - Enter the Peer ID of your recipient in the "Peer ID" field
+   - Click "Connect" to establish a connection
+   - Wait for the connection status to show "Connected"
+
+### Sending Files
+
+1. **Select Files or Folders**:
+   - Click "Select Files/Folders"
+   - Choose the files or folder you want to send
+
+2. **Initiate Transfer**:
+   - Click "Send" to begin the transfer
+   - The progress bar will show the current transfer status
+   - Transfer occurs in the background
+
+3. **Transfer Complete**:
+   - You'll be notified when the transfer is complete
+   - Files are automatically encrypted during transfer
+   - Received files are stored in the `data/received/` directory
+
+### Viewing Audit Logs
+
+- Transfer logs are automatically stored in the `logs/` directory
+- Logs contain: date/time, file name, size, peer ID, result (success/failure), and any errors
+
+## Testing Between Two Machines
+
+1. **Setup Both Machines**:
+   - Build and run TrustDrop on both machines
+
+2. **Exchange Peer IDs**:
+   - Generate a peer ID on the sending machine
+   - Share the peer ID with the receiving machine using a separate communication channel
+
+3. **Establish Connection**:
+   - On receiving machine: Enter the peer ID and click "Connect"
+   - Wait for connection to establish
+
+4. **Test Transfer**:
+   - On sending machine: Select files to send
+   - Files will be received automatically and stored in `data/received/`
+
+5. **Verify Transfer**:
+   - Check the received files on the receiving machine
+   - Verify the audit logs in the `logs/` directory
+
+## Project Structure
+
+```
+trustdrop/
+├── main.go                  // Application entry point
+├── go.mod                   // Go module dependencies
+├── README.md               // This file
+├── assets/                 // UI assets (icons, etc.)
+├── gui/                    // GUI implementation (Fyne-based)
+├── transfer/               // File transfer logic (wraps croc)
+├── security/               // Additional encryption and security
+├── logging/                // Transfer audit logging
+├── internal/               // Shared utilities
+└── data/                   // Runtime data directory
+    ├── received/           // Received files storage
+    └── temp/              // Temporary files
 ```
 
-```bash
-choco install croc
-```
+## Security
 
-```bash
-winget install schollz.croc
-```
+TrustDrop implements several security measures:
 
-### On Unix
+- End-to-end encryption using the croc protocol
+- AES-256-CBC encryption capabilities for additional security
+- TLS transmission with certificate verification
+- SHA-256 file integrity verification
+- All actions are logged for audit purposes
 
-You can install the latest release with [Nix](https://nixos.org/):
+## Troubleshooting
 
-```bash
-nix-env -i croc
-```
+### Connection Issues
 
-### On Alpine Linux
+If you encounter connection problems:
 
-First, install dependencies:
+1. **Check Network Configuration**:
+   - Ensure both peers have internet connectivity
+   - The application uses relay servers for NAT traversal
 
-```bash
-apk add bash coreutils
-wget -qO- https://getcroc.schollz.com | bash
-```
+2. **Try Again**:
+   - Sometimes connections can take a moment to establish
+   - Disconnect and try connecting again
 
-### On Arch Linux
+3. **Verify Peer ID**:
+   - Double-check that you entered the correct Peer ID
 
-Install with `pacman`:
+### File Transfer Issues
 
-```bash
-pacman -S croc
-```
+If file transfers fail:
 
-### On Fedora
+1. **Check Connection Status**:
+   - Ensure you're still connected to the peer
 
-Install with `dnf`:
+2. **Check Disk Space**:
+   - Ensure you have sufficient disk space for the incoming files
 
-```bash
-dnf install croc
-```
+3. **Restart Application**:
+   - In rare cases, restarting both applications can resolve issues
 
-### On Gentoo
+## Development
 
-Install with `portage`:
+This application is built on top of the excellent [croc](https://github.com/schollz/croc) file transfer tool, providing a GUI wrapper around its proven P2P transfer capabilities.
 
-```bash
-emerge net-misc/croc
-```
+### Dependencies
 
-### On Termux
+- [Fyne](https://fyne.io/) - Cross-platform GUI framework
+- [croc](https://github.com/schollz/croc) - Secure file transfer protocol
 
-Install with `pkg`:
+## License
 
-```bash
-pkg install croc
-```
-
-### On FreeBSD
-
-Install with `pkg`:
-
-```bash
-pkg install croc
-```
-
-### On Linux, macOS, and Windows via Conda
-
-You can install from [conda-forge](https://github.com/conda-forge/croc-feedstock) globally with [`pixi`](https://pixi.sh/):
-
-```bash
-pixi global install croc
-```
-
-Or install into a particular environment with [`conda`](https://docs.conda.io/projects/conda/):
-
-```bash
-conda install --channel conda-forge croc
-```
-
-### Build from Source
-
-If you prefer, you can [install Go](https://go.dev/dl/) and build from source (requires Go 1.22+):
-
-```bash
-go install github.com/schollz/croc/v10@latest
-```
-
-### On Android
-
-There is a 3rd-party F-Droid app [available to download](https://f-droid.org/packages/com.github.howeyc.crocgui/).
-
-## Usage
-
-To send a file, simply do:
-
-```bash
-$ croc send [file(s)-or-folder]
-Sending 'file-or-folder' (X MB)
-Code is: code-phrase
-```
-
-Then, to receive the file (or folder) on another computer, run:
-
-```bash
-croc code-phrase
-```
-
-The code phrase is used to establish password-authenticated key agreement ([PAKE](https://en.wikipedia.org/wiki/Password-authenticated_key_agreement)) which generates a secret key for the sender and recipient to use for end-to-end encryption.
-
-### Customizations & Options
-
-#### Using `croc` on Linux or macOS
-
-On Linux and macOS, the sending and receiving process is slightly different to avoid [leaking the secret via the process name](https://nvd.nist.gov/vuln/detail/CVE-2023-43621). You will need to run `croc` with the secret as an environment variable. For example, to receive with the secret `***`:
-
-```bash
-CROC_SECRET=*** croc
-```
-
-For single-user systems, the default behavior can be permanently enabled by running:
-
-```bash
-croc --classic
-```
-
-#### Custom Code Phrase
-
-You can send with your own code phrase (must be more than 6 characters):
-
-```bash
-croc send --code [code-phrase] [file(s)-or-folder]
-```
-
-#### Allow Overwriting Without Prompt
-
-To automatically overwrite files without prompting, use the `--overwrite` flag:
-
-```bash
-croc --yes --overwrite <code>
-```
-
-#### Excluding Folders
-
-To exclude folders from being sent, use the `--exclude` flag with comma-delimited exclusions:
-
-```bash
-croc send --exclude "node_modules,.venv" [folder]
-```
-
-#### Use Pipes - stdin and stdout
-
-You can pipe to `croc`:
-
-```bash
-cat [filename] | croc send
-```
-
-To receive the file to `stdout`, you can use:
-
-```bash
-croc --yes [code-phrase] > out
-```
-
-#### Send Text
-
-To send URLs or short text, use:
-
-```bash
-croc send --text "hello world"
-```
-
-#### Use a Proxy
-
-You can send files via a proxy by adding `--socks5`:
-
-```bash
-croc --socks5 "127.0.0.1:9050" send SOMEFILE
-```
-
-#### Change Encryption Curve
-
-To choose a different elliptic curve for encryption, use the `--curve` flag:
-
-```bash
-croc --curve p521 <codephrase>
-```
-
-#### Change Hash Algorithm
-
-For faster hashing, use the `imohash` algorithm:
-
-```bash
-croc send --hash imohash SOMEFILE
-```
-
-#### Self-host Relay
-
-You can run your own relay:
-
-```bash
-croc relay
-```
-
-By default, it uses TCP ports 9009-9013. You can customize the ports (e.g., `croc relay --ports 1111,1112`), but at least **2** ports are required.
-
-To send files using your relay:
-
-```bash
-croc --relay "myrelay.example.com:9009" send [filename]
-```
-
-#### Self-host Relay with Docker
-
-You can also run a relay with Docker:
-
-```bash
-docker run -d -p 9009-9013:9009-9013 -e CROC_PASS='YOURPASSWORD' schollz/croc
-```
-
-To send files using your custom relay:
-
-```bash
-croc --pass YOURPASSWORD --relay "myreal.example.com:9009" send [filename]
-```
-
-## Acknowledgements
-
-`croc` has evolved through many iterations, and I am thankful for the contributions! Special thanks to:
-
-- [@warner](https://github.com/warner) for the [idea](https://github.com/magic-wormhole/magic-wormhole)
-- [@tscholl2](https://github.com/tscholl2) for the [encryption gists](https://gist.github.com/tscholl2/dc7dc15dc132ea70a98e8542fefffa28)
-- [@skorokithakis](https://github.com/skorokithakis) for [proxying two connections](https://www.stavros.io/posts/proxying-two-connections-go/)
-
-And many more!
+[Include your license information here]
