@@ -2,6 +2,8 @@ package gui
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -178,22 +180,45 @@ func (t *TrustDropApp) onSelectFiles() {
 		return
 	}
 
-	// File dialog
 	dialog.ShowFolderOpen(func(folder fyne.ListableURI, err error) {
 		if err != nil {
-			dialog.ShowError(err, t.window)
+			if strings.Contains(err.Error(), "operation not permitted") {
+				dialog.ShowError(fmt.Errorf("permission denied: cannot access this folder. Please select a folder you have access to, or grant permission in System Preferences > Security & Privacy"), t.window)
+			} else {
+				dialog.ShowError(fmt.Errorf("failed to open folder: %v", err), t.window)
+			}
 			return
 		}
 		if folder == nil {
-			return // User cancelled
+			return
 		}
 
-		// Start file transfer
-		t.startSend(folder.Path())
+		folderPath := folder.Path()
+		if folderPath == "" {
+			dialog.ShowError(fmt.Errorf("invalid folder path"), t.window)
+			return
+		}
+
+		if _, err := os.Stat(folderPath); err != nil {
+			dialog.ShowError(fmt.Errorf("cannot access folder: %v", err), t.window)
+			return
+		}
+
+		t.startSend(folderPath)
 	}, t.window)
 }
 
 func (t *TrustDropApp) startSend(path string) {
+	if path == "" {
+		dialog.ShowError(fmt.Errorf("invalid file path"), t.window)
+		return
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		dialog.ShowError(fmt.Errorf("cannot access path %s: %v", path, err), t.window)
+		return
+	}
+
 	t.disableControls()
 	t.showProgress()
 

@@ -111,6 +111,7 @@ func (tm *TransferManager) receiveFiles() {
 		IsSender:     false,
 		SharedSecret: tm.currentSecret,
 		RelayAddress: "croc.schollz.com:9009",
+		RelayPorts:   []string{"9009", "9010", "9011", "9012", "9013"},
 		NoPrompt:     true,
 		Debug:        false,
 	}
@@ -153,6 +154,7 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		IsSender:     true,
 		SharedSecret: tm.localPeerID, // Use our local peer ID as the secret
 		RelayAddress: "croc.schollz.com:9009",
+		RelayPorts:   []string{"9009", "9010", "9011", "9012", "9013"},
 		NoPrompt:     true,
 		Debug:        false,
 	}
