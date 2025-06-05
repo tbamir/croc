@@ -16,6 +16,7 @@ type TransferManager struct {
 	isReceiving   bool
 	isSending     bool
 	currentSecret string
+	crocClient    *croc.Client
 }
 
 type TransferProgress struct {
@@ -89,7 +90,7 @@ func (tm *TransferManager) SendFiles(paths []string) error {
 	tm.isSending = true
 
 	if tm.statusCb != nil {
-		tm.statusCb("Connecting to receiver...")
+		tm.statusCb("Preparing files...")
 	}
 
 	// Start sending in background
@@ -103,17 +104,26 @@ func (tm *TransferManager) receiveFiles() {
 		tm.mutex.Lock()
 		tm.isReceiving = false
 		tm.currentSecret = ""
+		tm.crocClient = nil
 		tm.mutex.Unlock()
 	}()
 
 	// Create croc options for receiving
 	options := croc.Options{
-		IsSender:     false,
-		SharedSecret: tm.currentSecret,
-		RelayAddress: "croc.schollz.com:9009",
-		RelayPorts:   []string{"9009", "9010", "9011", "9012", "9013"},
-		NoPrompt:     true,
-		Debug:        false,
+		IsSender:       false,
+		SharedSecret:   tm.currentSecret,
+		RelayAddress:   "croc.schollz.com:9009",
+		RelayAddress6:  "croc6.schollz.com:9009",
+		RelayPorts:     []string{"9009", "9010", "9011", "9012", "9013"},
+		RelayPassword:  "pass123",
+		NoPrompt:       true,
+		NoMultiplexing: false,
+		DisableLocal:   false,
+		Ask:            false,
+		Debug:          false,
+		Overwrite:      true,
+		Curve:          "p256",
+		HashAlgorithm:  "xxhash",
 	}
 
 	// Initialize croc
@@ -124,6 +134,8 @@ func (tm *TransferManager) receiveFiles() {
 		}
 		return
 	}
+
+	tm.crocClient = c
 
 	if tm.statusCb != nil {
 		tm.statusCb("Connected! Receiving files...")
@@ -146,18 +158,9 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	defer func() {
 		tm.mutex.Lock()
 		tm.isSending = false
+		tm.crocClient = nil
 		tm.mutex.Unlock()
 	}()
-
-	// Create croc options for sending
-	options := croc.Options{
-		IsSender:     true,
-		SharedSecret: tm.localPeerID, // Use our local peer ID as the secret
-		RelayAddress: "croc.schollz.com:9009",
-		RelayPorts:   []string{"9009", "9010", "9011", "9012", "9013"},
-		NoPrompt:     true,
-		Debug:        false,
-	}
 
 	// Get file info
 	filesInfo, emptyFolders, totalFolders, err := croc.GetFilesInfo(paths, false, false, []string{})
@@ -166,6 +169,26 @@ func (tm *TransferManager) sendFiles(paths []string) {
 			tm.statusCb(fmt.Sprintf("Failed to analyze files: %v", err))
 		}
 		return
+	}
+
+	// Create croc options for sending
+	options := croc.Options{
+		IsSender:       true,
+		SharedSecret:   tm.localPeerID, // Use our local peer ID as the secret
+		RelayAddress:   "croc.schollz.com:9009",
+		RelayAddress6:  "croc6.schollz.com:9009",
+		RelayPorts:     []string{"9009", "9010", "9011", "9012", "9013"},
+		RelayPassword:  "pass123",
+		NoPrompt:       true,
+		NoMultiplexing: false,
+		DisableLocal:   false,
+		Ask:            false,
+		Debug:          false,
+		Overwrite:      true,
+		Curve:          "p256",
+		HashAlgorithm:  "xxhash",
+		SendingText:    false,
+		NoCompress:     false,
 	}
 
 	// Initialize croc
@@ -177,8 +200,10 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		return
 	}
 
+	tm.crocClient = c
+
 	if tm.statusCb != nil {
-		tm.statusCb("Connected! Sending files...")
+		tm.statusCb("Waiting for receiver to connect...")
 	}
 
 	// Start sending - this blocks until complete or error
@@ -209,6 +234,10 @@ func (tm *TransferManager) CancelTransfer() {
 	tm.isReceiving = false
 	tm.isSending = false
 	tm.currentSecret = ""
+
+	// Note: We can't actually cancel the croc transfer once started
+	// This is a limitation of the croc library
+	tm.crocClient = nil
 
 	if tm.statusCb != nil {
 		tm.statusCb("Transfer cancelled")

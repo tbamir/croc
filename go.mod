@@ -60,5 +60,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	honnef.co/go/js/dom v0.0.0-20210725211120-f030747120f2 // indirect
 )
-
-replace golang.org/x/sys => golang.org/x/sys v0.31.0

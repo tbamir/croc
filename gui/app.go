@@ -3,6 +3,7 @@ package gui
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -124,7 +125,7 @@ func (t *TrustDropApp) setupUI() {
 
 	sendSection := widget.NewCard("Send Files", "",
 		container.NewVBox(
-			widget.NewLabel("Send files using your Peer ID above:"),
+			widget.NewLabel("Select files to send:"),
 			container.NewPadded(t.selectBtn),
 		),
 	)
@@ -180,7 +181,8 @@ func (t *TrustDropApp) onSelectFiles() {
 		return
 	}
 
-	dialog.ShowFolderOpen(func(folder fyne.ListableURI, err error) {
+	// For simplicity, we'll use folder selection which allows selecting both files and folders
+	dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
 		if err != nil {
 			if strings.Contains(err.Error(), "operation not permitted") {
 				dialog.ShowError(fmt.Errorf("permission denied: cannot access this folder. Please select a folder you have access to, or grant permission in System Preferences > Security & Privacy"), t.window)
@@ -189,22 +191,25 @@ func (t *TrustDropApp) onSelectFiles() {
 			}
 			return
 		}
-		if folder == nil {
+		if uri == nil {
 			return
 		}
 
-		folderPath := folder.Path()
-		if folderPath == "" {
-			dialog.ShowError(fmt.Errorf("invalid folder path"), t.window)
-			return
+		path := uri.Path()
+		
+		// Handle URI schemes on different platforms
+		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") {
+			// Remove leading slash on Windows paths
+			path = path[1:]
 		}
 
-		if _, err := os.Stat(folderPath); err != nil {
+		// Verify we can access the path
+		if _, err := os.Stat(path); err != nil {
 			dialog.ShowError(fmt.Errorf("cannot access folder: %v", err), t.window)
 			return
 		}
 
-		t.startSend(folderPath)
+		t.startSend(path)
 	}, t.window)
 }
 
@@ -214,6 +219,7 @@ func (t *TrustDropApp) startSend(path string) {
 		return
 	}
 
+	// Verify the path exists
 	if _, err := os.Stat(path); err != nil {
 		dialog.ShowError(fmt.Errorf("cannot access path %s: %v", path, err), t.window)
 		return
@@ -241,17 +247,22 @@ func (t *TrustDropApp) onStatusUpdate(status string) {
 	t.statusLabel.SetText("Status: " + status)
 
 	// Show progress during active transfers
-	if status == "Waiting for sender..." || status == "Connecting to receiver..." ||
-		status == "Connected! Receiving files..." || status == "Connected! Sending files..." {
+	if strings.Contains(status, "Waiting") || strings.Contains(status, "Preparing") ||
+		strings.Contains(status, "Connected") || strings.Contains(status, "Sending") ||
+		strings.Contains(status, "Receiving") {
 		t.showProgress()
 	}
 
-	// Hide progress and re-enable controls when transfer is complete
-	if status == "Files received successfully!" || status == "Files sent successfully!" ||
-		status == "Transfer cancelled" ||
-		(status != "Ready" && (status[:6] == "Failed" || status[:7] == "Receive" && status[len(status)-6:] == "failed" || status[:4] == "Send" && status[len(status)-6:] == "failed")) {
+	// Hide progress and re-enable controls when transfer is complete or failed
+	if strings.Contains(status, "successfully") || strings.Contains(status, "cancelled") ||
+		strings.Contains(status, "failed") || strings.Contains(status, "Failed") {
 		t.hideProgress()
 		t.enableControls()
+		
+		// Show completion dialog for successful transfers
+		if strings.Contains(status, "successfully") {
+			dialog.ShowInformation("Transfer Complete", status, t.window)
+		}
 	}
 }
 
@@ -273,6 +284,7 @@ func (t *TrustDropApp) hideProgress() {
 	t.currentFileLabel.Hide()
 	t.remainingLabel.Hide()
 	t.cancelBtn.Hide()
+	t.progressBar.SetValue(0)
 }
 
 func (t *TrustDropApp) disableControls() {
