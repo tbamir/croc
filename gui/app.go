@@ -24,10 +24,9 @@ type TrustDropApp struct {
 	progressBar      *widget.ProgressBar
 	currentFileLabel *widget.Label
 	remainingLabel   *widget.Label
-	receiveBtn       *widget.Button
+	cancelBtn        *widget.Button
 
 	transferManager *transfer.TransferManager
-	isConnected     bool
 }
 
 func NewTrustDropApp() *TrustDropApp {
@@ -35,7 +34,7 @@ func NewTrustDropApp() *TrustDropApp {
 	myApp.SetIcon(fyne.NewStaticResource("icon", []byte{})) // TODO: Add actual icon
 
 	window := myApp.NewWindow("TrustDrop")
-	window.Resize(fyne.NewSize(450, 350))
+	window.Resize(fyne.NewSize(450, 380))
 	window.CenterOnScreen()
 
 	transferManager := transfer.NewTransferManager()
@@ -44,7 +43,6 @@ func NewTrustDropApp() *TrustDropApp {
 		app:             myApp,
 		window:          window,
 		transferManager: transferManager,
-		isConnected:     false,
 	}
 
 	// Set up callbacks
@@ -74,44 +72,17 @@ func (t *TrustDropApp) setupUI() {
 
 	// Peer ID input for connecting to others
 	t.peerIDEntry = widget.NewEntry()
-	t.peerIDEntry.SetPlaceHolder("Enter code from other peer")
+	t.peerIDEntry.SetPlaceHolder("Enter code from sender")
 
-	// Connect button
-	t.connectBtn = widget.NewButton("Connect", t.onConnect)
+	// Connect button - now starts receiving
+	t.connectBtn = widget.NewButton("Start Receiving", t.onStartReceive)
 	t.connectBtn.Importance = widget.HighImportance
 
 	// Status label
-	t.statusLabel = widget.NewLabel("Status: Not Connected")
+	t.statusLabel = widget.NewLabel("Status: Ready")
 
 	// File selection button
-	t.selectBtn = widget.NewButton("Select Files/Folders to Send", t.onSelectFiles)
-	t.selectBtn.Disable() // Disable until connected
-
-	// Receive button
-	receiveBtn := widget.NewButton("Wait for Files", func() {
-		if !t.isConnected {
-			dialog.ShowError(fmt.Errorf("please connect to a peer first"), t.window)
-			return
-		}
-
-		// Show progress UI
-		t.progressBar.Show()
-		t.currentFileLabel.Show()
-		t.remainingLabel.Show()
-
-		t.currentFileLabel.SetText("Waiting for files...")
-		t.remainingLabel.SetText("Status: Ready to receive")
-		t.progressBar.SetValue(0)
-
-		// Start receiving
-		go func() {
-			err := t.transferManager.ReceiveFiles()
-			if err != nil {
-				dialog.ShowError(err, t.window)
-			}
-		}()
-	})
-	receiveBtn.Disable() // Disable until connected
+	t.selectBtn = widget.NewButton("Send Files/Folders", t.onSelectFiles)
 
 	// Progress bar
 	t.progressBar = widget.NewProgressBar()
@@ -125,34 +96,46 @@ func (t *TrustDropApp) setupUI() {
 	t.remainingLabel = widget.NewLabel("")
 	t.remainingLabel.Hide() // Hide initially
 
+	// Cancel button
+	t.cancelBtn = widget.NewButton("Cancel Transfer", func() {
+		t.transferManager.CancelTransfer()
+		t.hideProgress()
+		t.enableControls()
+	})
+	t.cancelBtn.Importance = widget.DangerImportance
+	t.cancelBtn.Hide()
+
 	// Create sections with improved layout
-	yourIDSection := widget.NewCard("Your Peer ID", "Share this code with the other peer:",
+	yourIDSection := widget.NewCard("Your Peer ID", "Share this code with others to send you files:",
 		container.NewVBox(
 			container.NewBorder(nil, nil, nil, t.copyButton, t.localPeerIDLabel),
 		),
 	)
 
-	connectionSection := widget.NewCard("Connect to Peer", "",
+	receiveSection := widget.NewCard("Receive Files", "",
 		container.NewVBox(
-			widget.NewLabel("Enter code from other peer:"),
+			widget.NewLabel("Enter sender's code:"),
 			t.peerIDEntry,
 			container.NewPadded(t.connectBtn),
-			widget.NewSeparator(),
-			t.statusLabel,
 		),
 	)
 
-	transferSection := widget.NewCard("File Transfer", "",
+	sendSection := widget.NewCard("Send Files", "",
 		container.NewVBox(
-			container.NewGridWithColumns(2,
-				t.selectBtn,
-				receiveBtn,
-			),
+			widget.NewLabel("Send files using your Peer ID above:"),
+			container.NewPadded(t.selectBtn),
+		),
+	)
+
+	progressSection := widget.NewCard("Transfer Status", "",
+		container.NewVBox(
+			t.statusLabel,
 			widget.NewSeparator(),
-			widget.NewLabel("Transfer Progress:"),
+			widget.NewLabel("Progress:"),
 			t.progressBar,
 			t.currentFileLabel,
 			t.remainingLabel,
+			t.cancelBtn,
 		),
 	)
 
@@ -160,48 +143,41 @@ func (t *TrustDropApp) setupUI() {
 	content := container.NewVBox(
 		yourIDSection,
 		widget.NewSeparator(),
-		connectionSection,
+		receiveSection,
 		widget.NewSeparator(),
-		transferSection,
+		sendSection,
+		widget.NewSeparator(),
+		progressSection,
 	)
 
 	scrollableContent := container.NewScroll(content)
 	t.window.SetContent(container.NewPadded(scrollableContent))
-
-	// Store receiveBtn reference for enable/disable
-	t.receiveBtn = receiveBtn
 }
 
-func (t *TrustDropApp) onConnect() {
+func (t *TrustDropApp) onStartReceive() {
 	peerID := t.peerIDEntry.Text
 	if peerID == "" {
-		dialog.ShowError(fmt.Errorf("please enter a peer ID"), t.window)
+		dialog.ShowError(fmt.Errorf("please enter the sender's code"), t.window)
 		return
 	}
 
-	if t.isConnected {
-		// Disconnect
-		t.transferManager.Disconnect()
-		t.isConnected = false
-		t.connectBtn.SetText("Connect")
-		t.connectBtn.Importance = widget.HighImportance
-		t.selectBtn.Disable()
-		t.receiveBtn.Disable()
-		return
-	}
-
-	// Connect
-	t.connectBtn.Disable()
+	// Start receiving
+	t.disableControls()
 	go func() {
-		err := t.transferManager.ConnectToPeer(peerID)
+		err := t.transferManager.StartReceive(peerID)
 		if err != nil {
 			dialog.ShowError(err, t.window)
-			t.connectBtn.Enable()
+			t.enableControls()
 		}
 	}()
 }
 
 func (t *TrustDropApp) onSelectFiles() {
+	if t.transferManager.IsTransferActive() {
+		dialog.ShowError(fmt.Errorf("transfer already in progress"), t.window)
+		return
+	}
+
 	// File dialog
 	dialog.ShowFolderOpen(func(folder fyne.ListableURI, err error) {
 		if err != nil {
@@ -213,18 +189,16 @@ func (t *TrustDropApp) onSelectFiles() {
 		}
 
 		// Start file transfer
-		t.startTransfer(folder.Path())
+		t.startSend(folder.Path())
 	}, t.window)
 }
 
-func (t *TrustDropApp) startTransfer(path string) {
-	// Show progress UI
-	t.progressBar.Show()
-	t.currentFileLabel.Show()
-	t.remainingLabel.Show()
+func (t *TrustDropApp) startSend(path string) {
+	t.disableControls()
+	t.showProgress()
 
 	t.currentFileLabel.SetText("Preparing transfer...")
-	t.remainingLabel.SetText("Files Remaining: Calculating...")
+	t.remainingLabel.SetText("Analyzing files...")
 	t.progressBar.SetValue(0)
 
 	// Start the transfer
@@ -232,6 +206,8 @@ func (t *TrustDropApp) startTransfer(path string) {
 		err := t.transferManager.SendFiles([]string{path})
 		if err != nil {
 			dialog.ShowError(err, t.window)
+			t.enableControls()
+			t.hideProgress()
 		}
 	}()
 }
@@ -239,22 +215,18 @@ func (t *TrustDropApp) startTransfer(path string) {
 func (t *TrustDropApp) onStatusUpdate(status string) {
 	t.statusLabel.SetText("Status: " + status)
 
-	if status == fmt.Sprintf("Connected to peer: %s", t.transferManager.GetConnectedPeerID()) {
-		t.isConnected = true
-		t.connectBtn.Enable()
-		t.connectBtn.SetText("Disconnect")
-		t.connectBtn.Importance = widget.DangerImportance
-		t.selectBtn.Enable()
-		t.receiveBtn.Enable()
-	} else if status == "Not Connected" {
-		t.isConnected = false
-		t.connectBtn.Enable()
-		t.connectBtn.SetText("Connect")
-		t.connectBtn.Importance = widget.HighImportance
-		t.selectBtn.Disable()
-		t.receiveBtn.Disable()
-	} else if status == "Connecting..." {
-		t.connectBtn.SetText("Connecting...")
+	// Show progress during active transfers
+	if status == "Waiting for sender..." || status == "Connecting to receiver..." ||
+		status == "Connected! Receiving files..." || status == "Connected! Sending files..." {
+		t.showProgress()
+	}
+
+	// Hide progress and re-enable controls when transfer is complete
+	if status == "Files received successfully!" || status == "Files sent successfully!" ||
+		status == "Transfer cancelled" ||
+		(status != "Ready" && (status[:6] == "Failed" || status[:7] == "Receive" && status[len(status)-6:] == "failed" || status[:4] == "Send" && status[len(status)-6:] == "failed")) {
+		t.hideProgress()
+		t.enableControls()
 	}
 }
 
@@ -262,4 +234,30 @@ func (t *TrustDropApp) onProgressUpdate(progress transfer.TransferProgress) {
 	t.progressBar.SetValue(progress.PercentComplete / 100.0)
 	t.currentFileLabel.SetText("Current File: " + progress.CurrentFile)
 	t.remainingLabel.SetText(fmt.Sprintf("Files Remaining: %d", progress.FilesRemaining))
+}
+
+func (t *TrustDropApp) showProgress() {
+	t.progressBar.Show()
+	t.currentFileLabel.Show()
+	t.remainingLabel.Show()
+	t.cancelBtn.Show()
+}
+
+func (t *TrustDropApp) hideProgress() {
+	t.progressBar.Hide()
+	t.currentFileLabel.Hide()
+	t.remainingLabel.Hide()
+	t.cancelBtn.Hide()
+}
+
+func (t *TrustDropApp) disableControls() {
+	t.connectBtn.Disable()
+	t.selectBtn.Disable()
+	t.peerIDEntry.Disable()
+}
+
+func (t *TrustDropApp) enableControls() {
+	t.connectBtn.Enable()
+	t.selectBtn.Enable()
+	t.peerIDEntry.Enable()
 }
