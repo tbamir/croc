@@ -1,0 +1,162 @@
+[
+  {
+    "timestamp": "2025-06-06T23:52:16.589868-05:00",
+    "peer_id": "1104-egypt-twist-edison",
+    "file_name": ".DS_Store",
+    "file_hash": "",
+    "file_size": 8196,
+    "direction": "send",
+    "status": "cancelled",
+    "error": "User cancelled",
+    "duration": "10.844770666s"
+  },
+  {
+    "timestamp": "2025-06-07T00:20:25.43428-05:00",
+    "peer_id": "2058-master-caramel-colombo",
+    "file_name": ".DS_Store",
+    "file_hash": "",
+    "file_size": 8196,
+    "direction": "send",
+    "status": "success",
+    "duration": "25.583003167s"
+  },
+  {
+    "timestamp": "2025-06-07T14:57:57.03924-05:00",
+    "peer_id": "3581-charm-truck-george",
+    "file_name": "/Users/amirbeheshti/Downloads/Other files.xlsx - put these in a table.pdf",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "success",
+    "duration": "27.355492042s"
+  },
+  {
+    "timestamp": "2025-06-07T14:58:32.487937-05:00",
+    "peer_id": "3581-charm-truck-george",
+    "file_name": "/Users/amirbeheshti/Desktop/Resume",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "failed",
+    "error": "Transfer failed",
+    "duration": "50.082791ms"
+  },
+  {
+    "timestamp": "2025-06-07T14:58:52.423537-05:00",
+    "peer_id": "3581-charm-truck-george",
+    "file_name": "/Users/amirbeheshti/Downloads/Copy of Mentor-Mentee contract.docx",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "success",
+    "duration": "8.769928s"
+  },
+  {
+    "timestamp": "2025-06-07T15:03:51.876719-05:00",
+    "peer_id": "4256-visual-omega-amber",
+    "file_name": "/Users/amirbeheshti/Desktop/Work/MassSpec",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "failed",
+    "error": "Transfer failed",
+    "duration": "30.441709ms"
+  },
+  {
+    "timestamp": "2025-06-07T15:04:34.064202-05:00",
+    "peer_id": "4256-visual-omega-amber",
+    "file_name": "/Users/amirbeheshti/Desktop/Work/MassSpec",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "failed",
+    "error": "Transfer failed",
+    "duration": "18.153792ms"
+  },
+  {
+    "timestamp": "2025-06-07T15:04:47.842928-05:00",
+    "peer_id": "4256-visual-omega-amber",
+    "file_name": "/Users/amirbeheshti/Desktop/Work/MassSpec",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "failed",
+    "error": "Transfer failed",
+    "duration": "13.547458ms"
+  },
+  {
+    "timestamp": "2025-06-07T15:05:00.036464-05:00",
+    "peer_id": "4256-visual-omega-amber",
+    "file_name": "/Users/amirbeheshti/Desktop/Work/MassSpec/blockchain-app",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "failed",
+    "error": "Transfer failed",
+    "duration": "22.874333ms"
+  },
+  {
+    "timestamp": "2025-06-07T15:05:20.620515-05:00",
+    "peer_id": "4306-rodent-chief-metal",
+    "file_name": "/Users/amirbeheshti/Desktop/Resume",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "failed",
+    "error": "Transfer failed",
+    "duration": "47.330917ms"
+  },
+  {
+    "timestamp": "2025-06-07T15:06:04.817247-05:00",
+    "peer_id": "4055-baboon-balsa-laptop",
+    "file_name": "/Users/amirbeheshti/Downloads/Other files.xlsx - put these in a table.pdf",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "cancelled",
+    "error": "User cancelled",
+    "duration": "6.044630958s"
+  },
+  {
+    "timestamp": "2025-06-07T15:06:13.663795-05:00",
+    "peer_id": "4055-baboon-balsa-laptop",
+    "file_name": "/Users/amirbeheshti/Desktop/Resume",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "failed",
+    "error": "Transfer failed",
+    "duration": "27.057709ms"
+  },
+  {
+    "timestamp": "2025-06-07T15:20:16.257412-05:00",
+    "peer_id": "3181-danube-rocket-iris",
+    "file_name": "/Users/amirbeheshti/Desktop/Work/MassSpec",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "cancelled",
+    "error": "User cancelled",
+    "duration": "1m24.325855708s"
+  },
+  {
+    "timestamp": "2025-06-07T15:20:48.777496-05:00",
+    "peer_id": "3181-danube-rocket-iris",
+    "file_name": "/Users/amirbeheshti/Desktop/Resume",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "success",
+    "duration": "26.038366125s"
+  },
+  {
+    "timestamp": "2025-06-07T15:22:48.087674-05:00",
+    "peer_id": "3181-danube-rocket-iris",
+    "file_name": "/Users/amirbeheshti/Desktop/Work/SequestBio",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "success",
+    "duration": "56.10843175s"
+  }
+]
