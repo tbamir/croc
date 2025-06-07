@@ -295,5 +295,23 @@
     "previous_hash": "0053e1bff81692fc122ebd22cd54b943c46f0dea1db66245097c2e7a5adcf335",
     "hash": "00385e92eec0198a80a8f35423b0a7a1d2e7e091a23229b2cbc7128f5cdd6028",
     "nonce": 40
+  },
+  {
+    "index": 16,
+    "timestamp": "2025-06-07T15:57:03.65006-05:00",
+    "data": {
+      "transfer_id": "d439391c0c274fec",
+      "peer_id": "6512-pedro-pretend-mother",
+      "file_name": "/Users/amirbeheshti/Desktop/Work/MassSpec",
+      "file_size": 0,
+      "file_hash": "",
+      "direction": "send",
+      "status": "success",
+      "duration": "3m55.312372083s",
+      "timestamp": "2025-06-07T15:57:03.650048-05:00"
+    },
+    "previous_hash": "00385e92eec0198a80a8f35423b0a7a1d2e7e091a23229b2cbc7128f5cdd6028",
+    "hash": "0033336ee3c86b873785f09df69600a3b69e9207d56a0c3070aec01e39511508",
+    "nonce": 37
   }
 ]

@@ -3,6 +3,7 @@ package transfer
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"trustdrop/internal"
 	"trustdrop/logging"
 	"trustdrop/security"
 
@@ -41,6 +41,20 @@ type TransferProgress struct {
 	PercentComplete  float64
 	BytesTransferred int64
 	TotalBytes       int64
+}
+
+// FileManifest stores the mapping between anonymized filenames and original paths
+type FileManifest struct {
+	Files map[string]FileInfo `json:"files"` // hash -> original info
+}
+
+type FileInfo struct {
+	OriginalPath   string `json:"original_path"`
+	RelativePath   string `json:"relative_path"`
+	IsDirectory    bool   `json:"is_directory"`
+	Size           int64  `json:"size"`
+	Hash           string `json:"hash"`
+	AnonymizedName string `json:"anonymized_name"`
 }
 
 func NewTransferManager() (*TransferManager, error) {
@@ -274,61 +288,189 @@ func (tm *TransferManager) receiveFiles() {
 		return
 	}
 
-	fmt.Printf("TransferManager: Receive successful!\n")
+	fmt.Printf("TransferManager: Receive successful! Processing files...\n")
 
-	// Decrypt received files
+	// Process received files - decrypt and restore original structure
 	files, err := filepath.Glob("*")
-	if err == nil && len(files) > 0 {
-		for _, encFile := range files {
-			fmt.Printf("TransferManager: Decrypting %s\n", encFile)
-
-			// Read encrypted file
-			encData, err := os.ReadFile(encFile)
-			if err != nil {
-				fmt.Printf("TransferManager: Failed to read encrypted file: %v\n", err)
-				continue
-			}
-
-			// Decrypt the file
-			decData, err := security.DecryptAES256CBC(encData, tm.encryptionKey)
-			if err != nil {
-				fmt.Printf("TransferManager: Failed to decrypt file: %v\n", err)
-				continue
-			}
-
-			// Remove .enc extension if present
-			decFile := encFile
-			if filepath.Ext(encFile) == ".enc" {
-				decFile = encFile[:len(encFile)-4]
-			}
-
-			// Write decrypted file to final location with secure permissions
-			finalPath := filepath.Join(originalDir, "data", "received", decFile)
-			os.MkdirAll(filepath.Dir(finalPath), 0700)
-
-			if err := os.WriteFile(finalPath, decData, 0600); err != nil {
-				fmt.Printf("TransferManager: Failed to write decrypted file: %v\n", err)
-				continue
-			}
-
-			// Calculate hash of decrypted file
-			hash, err := tm.calculateFileHash(finalPath)
-			if err == nil {
-				tm.fileHashes[decFile] = hash
-			}
-
-			// Update transfer info
-			if tm.currentFile == "" {
-				tm.currentFile = decFile
-				tm.currentSize = int64(len(decData))
-			}
-
-			fmt.Printf("TransferManager: Successfully decrypted %s to %s\n", encFile, finalPath)
+	if err != nil || len(files) == 0 {
+		fmt.Printf("TransferManager: No files received\n")
+		if tm.statusCb != nil {
+			tm.statusCb("No files received")
 		}
+		return
 	}
 
 	if tm.statusCb != nil {
-		tm.statusCb("Files received and decrypted successfully!")
+		tm.statusCb("Decrypting and restoring files...")
+	}
+
+	// Look for and decrypt the manifest file first
+	var manifest *FileManifest
+	manifestFound := false
+
+	for _, file := range files {
+		if file == "manifest.enc" {
+			fmt.Printf("TransferManager: Found manifest file, decrypting...\n")
+
+			encData, err := os.ReadFile(file)
+			if err != nil {
+				fmt.Printf("TransferManager: Failed to read manifest: %v\n", err)
+				continue
+			}
+
+			decData, err := security.DecryptAES256CBC(encData, tm.encryptionKey)
+			if err != nil {
+				fmt.Printf("TransferManager: Failed to decrypt manifest: %v\n", err)
+				continue
+			}
+
+			manifest = &FileManifest{}
+			if err := json.Unmarshal(decData, manifest); err != nil {
+				fmt.Printf("TransferManager: Failed to parse manifest: %v\n", err)
+				continue
+			}
+
+			manifestFound = true
+			fmt.Printf("TransferManager: Manifest loaded with %d file entries\n", len(manifest.Files))
+			break
+		}
+	}
+
+	if !manifestFound {
+		fmt.Printf("TransferManager: No manifest found, using fallback decryption\n")
+		tm.fallbackDecryption(files, originalDir)
+		return
+	}
+
+	// Decrypt files using manifest
+	successCount := 0
+	for _, file := range files {
+		if file == "manifest.enc" {
+			continue // Skip the manifest file itself
+		}
+
+		fmt.Printf("TransferManager: Processing file: %s\n", file)
+
+		// Read encrypted file
+		encData, err := os.ReadFile(file)
+		if err != nil {
+			fmt.Printf("TransferManager: Failed to read %s: %v\n", file, err)
+			continue
+		}
+
+		// Decrypt the file
+		decData, err := security.DecryptAES256CBC(encData, tm.encryptionKey)
+		if err != nil {
+			fmt.Printf("TransferManager: Failed to decrypt %s: %v\n", file, err)
+			continue
+		}
+
+		// Find original path from manifest
+		fileInfo, exists := manifest.Files[file]
+		if !exists {
+			fmt.Printf("TransferManager: File %s not found in manifest, using fallback name\n", file)
+			// Fallback to hash name
+			finalPath := filepath.Join(originalDir, "data", "received", file)
+			os.MkdirAll(filepath.Dir(finalPath), 0755)
+			if err := os.WriteFile(finalPath, decData, 0644); err != nil {
+				fmt.Printf("TransferManager: Failed to write fallback file: %v\n", err)
+			} else {
+				successCount++
+			}
+			continue
+		}
+
+		// Restore original path and filename
+		finalPath := filepath.Join(originalDir, "data", "received", fileInfo.RelativePath)
+
+		// Create directory structure
+		if err := os.MkdirAll(filepath.Dir(finalPath), 0755); err != nil {
+			fmt.Printf("TransferManager: Failed to create directory for %s: %v\n", finalPath, err)
+			continue
+		}
+
+		// Write decrypted file with original name
+		if err := os.WriteFile(finalPath, decData, 0644); err != nil {
+			fmt.Printf("TransferManager: Failed to write %s: %v\n", finalPath, err)
+			continue
+		}
+
+		// Calculate hash of decrypted file
+		hash, err := tm.calculateFileHash(finalPath)
+		if err == nil {
+			tm.fileHashes[fileInfo.RelativePath] = hash
+		}
+
+		// Update transfer info
+		if tm.currentFile == "" {
+			tm.currentFile = fileInfo.RelativePath
+			tm.currentSize = int64(len(decData))
+		}
+
+		fmt.Printf("TransferManager: ✅ Restored: %s (%.2f KB)\n", fileInfo.RelativePath, float64(len(decData))/1024)
+		successCount++
+	}
+
+	fmt.Printf("TransferManager: Successfully restored %d files with original names and structure!\n", successCount)
+
+	if tm.statusCb != nil {
+		tm.statusCb(fmt.Sprintf("Transfer complete! %d files restored successfully", successCount))
+	}
+}
+
+// fallbackDecryption handles files when no manifest is available
+func (tm *TransferManager) fallbackDecryption(files []string, originalDir string) {
+	fmt.Printf("TransferManager: Using fallback decryption mode\n")
+
+	successCount := 0
+	for _, encFile := range files {
+		fmt.Printf("TransferManager: Decrypting %s\n", encFile)
+
+		// Read encrypted file
+		encData, err := os.ReadFile(encFile)
+		if err != nil {
+			fmt.Printf("TransferManager: Failed to read encrypted file: %v\n", err)
+			continue
+		}
+
+		// Decrypt the file
+		decData, err := security.DecryptAES256CBC(encData, tm.encryptionKey)
+		if err != nil {
+			fmt.Printf("TransferManager: Failed to decrypt file: %v\n", err)
+			continue
+		}
+
+		// Use hash name as filename for fallback
+		finalPath := filepath.Join(originalDir, "data", "received", encFile)
+		os.MkdirAll(filepath.Dir(finalPath), 0755)
+
+		if err := os.WriteFile(finalPath, decData, 0644); err != nil {
+			fmt.Printf("TransferManager: Failed to write decrypted file: %v\n", err)
+			continue
+		}
+
+		// Calculate hash of decrypted file
+		hash, err := tm.calculateFileHash(finalPath)
+		if err == nil {
+			tm.fileHashes[encFile] = hash
+		}
+
+		// Update transfer info
+		if tm.currentFile == "" {
+			tm.currentFile = encFile
+			tm.currentSize = int64(len(decData))
+		}
+
+		fmt.Printf("TransferManager: Successfully decrypted %s\n", encFile)
+		successCount++
+	}
+
+	if tm.statusCb != nil {
+		if successCount > 0 {
+			tm.statusCb(fmt.Sprintf("Files received and decrypted (%d files) - original names not preserved", successCount))
+		} else {
+			tm.statusCb("Failed to decrypt received files")
+		}
 	}
 }
 
@@ -367,7 +509,7 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		tm.mutex.Unlock()
 	}()
 
-	fmt.Printf("TransferManager: Getting file info for paths: %v\n", paths)
+	fmt.Printf("TransferManager: Preparing files for secure transfer...\n")
 
 	// Create temporary directory for encrypted files
 	tempDir := filepath.Join("data", "temp", fmt.Sprintf("send-%d", time.Now().Unix()))
@@ -380,8 +522,23 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	}
 	defer os.RemoveAll(tempDir) // Clean up temp directory
 
+	// Create manifest to preserve file structure
+	manifest := &FileManifest{
+		Files: make(map[string]FileInfo),
+	}
+
 	// Process files and folders
 	var filesToEncrypt []string
+	var baseDir string
+
+	// Determine if we're sending a single folder or multiple items
+	if len(paths) == 1 {
+		fileInfo, err := os.Stat(paths[0])
+		if err == nil && fileInfo.IsDir() {
+			baseDir = paths[0]
+		}
+	}
+
 	for _, path := range paths {
 		fileInfo, err := os.Stat(path)
 		if err != nil {
@@ -410,9 +567,23 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		}
 	}
 
-	// Encrypt files before sending
+	if len(filesToEncrypt) == 0 {
+		fmt.Printf("TransferManager: No files to send\n")
+		if tm.statusCb != nil {
+			tm.statusCb("No files found to send")
+		}
+		return
+	}
+
+	fmt.Printf("TransferManager: Encrypting %d files...\n", len(filesToEncrypt))
+
+	// Encrypt files and build manifest
 	var encryptedPaths []string
-	for _, filePath := range filesToEncrypt {
+	for i, filePath := range filesToEncrypt {
+		if tm.statusCb != nil {
+			tm.statusCb(fmt.Sprintf("Encrypting file %d of %d...", i+1, len(filesToEncrypt)))
+		}
+
 		// Calculate hash of original file
 		hash, err := tm.calculateFileHash(filePath)
 		if err != nil {
@@ -434,28 +605,11 @@ func (tm *TransferManager) sendFiles(paths []string) {
 			continue
 		}
 
-		// Preserve relative path structure for folders, but sanitize filenames
-		var encFile string
-		if len(paths) == 1 && len(filesToEncrypt) > 1 {
-			// This is a folder transfer, preserve structure
-			baseDir := paths[0]
-			relPath, _ := filepath.Rel(baseDir, filePath)
-			// Sanitize the relative path to handle problematic Unicode characters
-			sanitizedRelPath := internal.SanitizePath(relPath)
-			encFile = filepath.Join(tempDir, sanitizedRelPath+".enc")
-			// Create subdirectories if needed
-			encDir := filepath.Dir(encFile)
-			if err := os.MkdirAll(encDir, 0700); err != nil {
-				fmt.Printf("TransferManager: Failed to create directory %s: %v\n", encDir, err)
-				continue
-			}
-		} else {
-			// Single file or multiple individual files
-			// Sanitize the filename to handle problematic Unicode characters
-			sanitizedBaseName := internal.SanitizeFilename(filepath.Base(filePath))
-			encFile = filepath.Join(tempDir, sanitizedBaseName+".enc")
-		}
+		// Generate anonymized filename
+		anonymizedName := hex.EncodeToString(sha256.New().Sum([]byte(filePath + hash)))[:32]
 
+		// Create encrypted file path
+		encFile := filepath.Join(tempDir, anonymizedName)
 		if err := os.WriteFile(encFile, encData, 0600); err != nil {
 			fmt.Printf("TransferManager: Failed to write encrypted file: %v\n", err)
 			continue
@@ -463,39 +617,99 @@ func (tm *TransferManager) sendFiles(paths []string) {
 
 		encryptedPaths = append(encryptedPaths, encFile)
 
-		// Store file info using sanitized basename to match what gets transferred
-		baseName := filepath.Base(encFile)
-		if filepath.Ext(baseName) == ".enc" {
-			baseName = baseName[:len(baseName)-4] // Remove .enc extension
+		// Determine relative path for the manifest
+		var relativePath string
+		if baseDir != "" {
+			// We're sending a folder, preserve structure
+			relPath, err := filepath.Rel(baseDir, filePath)
+			if err != nil {
+				relativePath = filepath.Base(filePath)
+			} else {
+				relativePath = relPath
+			}
+		} else {
+			// Multiple files or single file, use base name
+			relativePath = filepath.Base(filePath)
 		}
-		tm.fileHashes[baseName] = hash
+
+		// Add to manifest
+		manifest.Files[anonymizedName] = FileInfo{
+			OriginalPath:   filePath,
+			RelativePath:   relativePath,
+			IsDirectory:    false,
+			Size:           int64(len(data)),
+			Hash:           hash,
+			AnonymizedName: anonymizedName,
+		}
+
+		// Store file info for logging
+		tm.fileHashes[relativePath] = hash
 		if tm.currentFile == "" {
-			tm.currentFile = baseName
+			tm.currentFile = relativePath
 			tm.currentSize = int64(len(data))
 		}
 
-		fmt.Printf("TransferManager: Encrypted %s -> %s (hash: %s)\n", filePath, encFile, hash)
+		fmt.Printf("TransferManager: ✅ Encrypted: %s -> %s\n", relativePath, anonymizedName)
 	}
 
 	if len(encryptedPaths) == 0 {
-		fmt.Printf("TransferManager: No files to send after encryption\n")
+		fmt.Printf("TransferManager: No files encrypted successfully\n")
 		if tm.statusCb != nil {
 			tm.statusCb("Failed to encrypt files")
 		}
 		return
 	}
 
-	// Get file info for encrypted files
-	filesInfo, emptyFolders, totalFolders, err := croc.GetFilesInfo(encryptedPaths, false, false, []string{})
+	// Create and encrypt manifest
+	manifestData, err := json.Marshal(manifest)
 	if err != nil {
-		fmt.Printf("TransferManager: Failed to analyze files: %v\n", err)
+		fmt.Printf("TransferManager: Failed to marshal manifest: %v\n", err)
 		if tm.statusCb != nil {
-			tm.statusCb(fmt.Sprintf("Failed to analyze files: %v", err))
+			tm.statusCb("Failed to create file manifest")
 		}
 		return
 	}
 
-	// Create croc options for sending
+	encryptedManifest, err := security.EncryptAES256CBC(manifestData, tm.encryptionKey)
+	if err != nil {
+		fmt.Printf("TransferManager: Failed to encrypt manifest: %v\n", err)
+		if tm.statusCb != nil {
+			tm.statusCb("Failed to encrypt file manifest")
+		}
+		return
+	}
+
+	manifestPath := filepath.Join(tempDir, "manifest.enc")
+	if err := os.WriteFile(manifestPath, encryptedManifest, 0600); err != nil {
+		fmt.Printf("TransferManager: Failed to write manifest: %v\n", err)
+		if tm.statusCb != nil {
+			tm.statusCb("Failed to save file manifest")
+		}
+		return
+	}
+
+	// Add manifest to files to send
+	encryptedPaths = append(encryptedPaths, manifestPath)
+
+	fmt.Printf("TransferManager: Created manifest with %d file entries\n", len(manifest.Files))
+
+	// Get file info for encrypted files
+	filesInfo, emptyFolders, totalFolders, err := croc.GetFilesInfo(encryptedPaths, false, false, []string{})
+	if err != nil {
+		fmt.Printf("TransferManager: Failed to get files info: %v\n", err)
+		if tm.statusCb != nil {
+			tm.statusCb(fmt.Sprintf("Failed to prepare files: %v", err))
+		}
+		return
+	}
+
+	fmt.Printf("TransferManager: Prepared %d encrypted files for transfer\n", len(filesInfo))
+
+	if tm.statusCb != nil {
+		tm.statusCb("Starting secure transfer...")
+	}
+
+	// Configure croc for sending
 	options := croc.Options{
 		IsSender:       true,
 		SharedSecret:   tm.localPeerID,
@@ -511,8 +725,6 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		Overwrite:      true,
 		Curve:          "p256",
 		HashAlgorithm:  "xxhash",
-		SendingText:    false,
-		NoCompress:     false,
 	}
 
 	// Initialize croc
@@ -520,32 +732,33 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	if err != nil {
 		fmt.Printf("TransferManager: Failed to initialize croc: %v\n", err)
 		if tm.statusCb != nil {
-			tm.statusCb(fmt.Sprintf("Failed to initialize: %v", err))
+			tm.statusCb(fmt.Sprintf("Failed to initialize transfer: %v", err))
 		}
 		return
 	}
 
 	tm.crocClient = c
 
-	if tm.statusCb != nil {
-		tm.statusCb("Waiting for receiver to connect...")
-	}
+	// Set transfer options
+	c.FilesToTransfer = filesInfo
+	c.EmptyFoldersToTransfer = emptyFolders
+	c.TotalNumberFolders = totalFolders
 
-	fmt.Printf("TransferManager: Starting croc send...\n")
-	fmt.Printf("TransferManager: Receiver should use code: %s\n", tm.localPeerID)
+	fmt.Printf("TransferManager: Starting encrypted transfer...\n")
 
 	// Start sending - this blocks until complete or error
 	err = c.Send(filesInfo, emptyFolders, totalFolders)
 	if err != nil {
 		fmt.Printf("TransferManager: Send failed: %v\n", err)
 		if tm.statusCb != nil {
-			tm.statusCb(fmt.Sprintf("Send failed: %v", err))
+			tm.statusCb(fmt.Sprintf("Transfer failed: %v", err))
 		}
-	} else {
-		fmt.Printf("TransferManager: Send successful!\n")
-		if tm.statusCb != nil {
-			tm.statusCb("Files sent successfully!")
-		}
+		return
+	}
+
+	fmt.Printf("TransferManager: Transfer completed successfully!\n")
+	if tm.statusCb != nil {
+		tm.statusCb("Transfer completed successfully!")
 	}
 }
 

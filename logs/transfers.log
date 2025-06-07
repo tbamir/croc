@@ -158,5 +158,15 @@
     "direction": "send",
     "status": "success",
     "duration": "56.10843175s"
+  },
+  {
+    "timestamp": "2025-06-07T15:57:03.650048-05:00",
+    "peer_id": "6512-pedro-pretend-mother",
+    "file_name": "/Users/amirbeheshti/Desktop/Work/MassSpec",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "success",
+    "duration": "3m55.312372083s"
   }
 ]
