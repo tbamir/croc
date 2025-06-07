@@ -36,6 +36,8 @@ type TransferProgress struct {
 func NewTransferManager() (*TransferManager, error) {
 	// Generate local peer ID using croc's method
 	localPeerID := utils.GetRandomName()
+	
+	fmt.Printf("TransferManager: Generated local peer ID: %s\n", localPeerID)
 
 	// Initialize logger with blockchain
 	logger, err := logging.NewLogger()
@@ -78,6 +80,8 @@ func (tm *TransferManager) StartReceive(peerSecret string) error {
 		return fmt.Errorf("transfer already in progress")
 	}
 
+	fmt.Printf("TransferManager: Starting receive with peer secret: %s\n", peerSecret)
+
 	tm.currentSecret = peerSecret
 	tm.isReceiving = true
 	tm.transferStart = time.Now()
@@ -100,6 +104,8 @@ func (tm *TransferManager) SendFiles(paths []string) error {
 	if tm.isReceiving || tm.isSending {
 		return fmt.Errorf("transfer already in progress")
 	}
+
+	fmt.Printf("TransferManager: Starting send with paths: %v\n", paths)
 
 	tm.isSending = true
 	tm.transferStart = time.Now()
@@ -130,9 +136,16 @@ func (tm *TransferManager) receiveFiles() {
 		status := "success"
 		errorMsg := ""
 		
-		if tm.statusCb != nil && tm.currentFile == "" {
+		if tm.currentFile == "" {
 			status = "failed"
 			errorMsg = "No files received"
+		}
+		
+		if tm.crocClient != nil && !tm.crocClient.SuccessfulTransfer {
+			status = "failed"
+			if errorMsg == "" {
+				errorMsg = "Transfer failed"
+			}
 		}
 		
 		tm.logTransfer(tm.currentSecret, tm.currentFile, tm.currentSize, "receive", status, errorMsg, duration)
@@ -142,6 +155,8 @@ func (tm *TransferManager) receiveFiles() {
 		tm.crocClient = nil
 		tm.mutex.Unlock()
 	}()
+
+	fmt.Printf("TransferManager: Configuring croc for receiving...\n")
 
 	// Create croc options for receiving
 	options := croc.Options{
@@ -155,7 +170,7 @@ func (tm *TransferManager) receiveFiles() {
 		NoMultiplexing: false,
 		DisableLocal:   false,
 		Ask:            false,
-		Debug:          false,
+		Debug:          true, // Enable debug for troubleshooting
 		Overwrite:      true,
 		Curve:          "p256",
 		HashAlgorithm:  "xxhash",
@@ -164,6 +179,7 @@ func (tm *TransferManager) receiveFiles() {
 	// Initialize croc
 	c, err := croc.New(options)
 	if err != nil {
+		fmt.Printf("TransferManager: Failed to initialize croc: %v\n", err)
 		if tm.statusCb != nil {
 			tm.statusCb(fmt.Sprintf("Failed to initialize: %v", err))
 		}
@@ -173,16 +189,20 @@ func (tm *TransferManager) receiveFiles() {
 	tm.crocClient = c
 
 	if tm.statusCb != nil {
-		tm.statusCb("Connected! Receiving files...")
+		tm.statusCb("Connecting to sender...")
 	}
+
+	fmt.Printf("TransferManager: Starting croc receive...\n")
 
 	// Start receiving - this blocks until complete or error
 	err = c.Receive()
 	if err != nil {
+		fmt.Printf("TransferManager: Receive failed: %v\n", err)
 		if tm.statusCb != nil {
 			tm.statusCb(fmt.Sprintf("Receive failed: %v", err))
 		}
 	} else {
+		fmt.Printf("TransferManager: Receive successful!\n")
 		if tm.statusCb != nil {
 			tm.statusCb("Files received successfully!")
 		}
@@ -215,9 +235,12 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		tm.mutex.Unlock()
 	}()
 
+	fmt.Printf("TransferManager: Getting file info for paths: %v\n", paths)
+
 	// Get file info
 	filesInfo, emptyFolders, totalFolders, err := croc.GetFilesInfo(paths, false, false, []string{})
 	if err != nil {
+		fmt.Printf("TransferManager: Failed to analyze files: %v\n", err)
 		if tm.statusCb != nil {
 			tm.statusCb(fmt.Sprintf("Failed to analyze files: %v", err))
 		}
@@ -228,6 +251,7 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	if len(filesInfo) > 0 {
 		tm.currentFile = filesInfo[0].Name
 		tm.currentSize = filesInfo[0].Size
+		fmt.Printf("TransferManager: Sending file: %s (size: %d bytes)\n", tm.currentFile, tm.currentSize)
 	}
 
 	// Create croc options for sending
@@ -242,7 +266,7 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		NoMultiplexing: false,
 		DisableLocal:   false,
 		Ask:            false,
-		Debug:          false,
+		Debug:          true, // Enable debug for troubleshooting
 		Overwrite:      true,
 		Curve:          "p256",
 		HashAlgorithm:  "xxhash",
@@ -253,6 +277,7 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	// Initialize croc
 	c, err := croc.New(options)
 	if err != nil {
+		fmt.Printf("TransferManager: Failed to initialize croc: %v\n", err)
 		if tm.statusCb != nil {
 			tm.statusCb(fmt.Sprintf("Failed to initialize: %v", err))
 		}
@@ -265,13 +290,18 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		tm.statusCb("Waiting for receiver to connect...")
 	}
 
+	fmt.Printf("TransferManager: Starting croc send...\n")
+	fmt.Printf("TransferManager: Receiver should use code: %s\n", tm.localPeerID)
+
 	// Start sending - this blocks until complete or error
 	err = c.Send(filesInfo, emptyFolders, totalFolders)
 	if err != nil {
+		fmt.Printf("TransferManager: Send failed: %v\n", err)
 		if tm.statusCb != nil {
 			tm.statusCb(fmt.Sprintf("Send failed: %v", err))
 		}
 	} else {
+		fmt.Printf("TransferManager: Send successful!\n")
 		if tm.statusCb != nil {
 			tm.statusCb("Files sent successfully!")
 		}
@@ -294,6 +324,8 @@ func (tm *TransferManager) logTransfer(peerID, fileName string, fileSize int64, 
 	if err := tm.logger.LogTransfer(log); err != nil {
 		// Log error but don't fail the transfer
 		fmt.Printf("Failed to log transfer to blockchain: %v\n", err)
+	} else {
+		fmt.Printf("Transfer logged to blockchain: %s %s (%s)\n", direction, fileName, status)
 	}
 }
 
@@ -308,6 +340,8 @@ func (tm *TransferManager) IsTransferActive() bool {
 func (tm *TransferManager) CancelTransfer() {
 	tm.mutex.Lock()
 	defer tm.mutex.Unlock()
+
+	fmt.Printf("TransferManager: Cancelling transfer...\n")
 
 	// Log cancelled transfer
 	if tm.isReceiving || tm.isSending {

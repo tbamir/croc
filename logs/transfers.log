@@ -1,0 +1,12 @@
+[
+  {
+    "timestamp": "2025-06-06T23:52:16.589868-05:00",
+    "peer_id": "1104-egypt-twist-edison",
+    "file_name": ".DS_Store",
+    "file_size": 8196,
+    "direction": "send",
+    "status": "cancelled",
+    "error": "User cancelled",
+    "duration": "10.844770666s"
+  }
+]

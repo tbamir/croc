@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"trustdrop/assets"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -43,7 +44,9 @@ type TrustDropApp struct {
 
 func NewTrustDropApp() (*TrustDropApp, error) {
 	myApp := app.New()
-	myApp.SetIcon(fyne.NewStaticResource("icon", []byte{})) // TODO: Add actual icon
+	
+	// Set the icon using the fixed icon data
+	myApp.SetIcon(assets.GetAppIcon())
 
 	window := myApp.NewWindow("TrustDrop - Secure File Transfer")
 	window.Resize(fyne.NewSize(450, 400))
@@ -61,7 +64,7 @@ func NewTrustDropApp() (*TrustDropApp, error) {
 		showAdvanced:    false, // Hidden by default
 	}
 
-	// Set up callbacks
+	// Set up callbacks with better error handling
 	transferManager.SetStatusCallback(app.onStatusUpdate)
 	transferManager.SetProgressCallback(app.onProgressUpdate)
 
@@ -70,6 +73,10 @@ func NewTrustDropApp() (*TrustDropApp, error) {
 
 func (t *TrustDropApp) Run() {
 	t.setupUI()
+	
+	// Show the local peer ID in console for debugging
+	fmt.Printf("TrustDrop started. Your Peer ID: %s\n", t.transferManager.GetLocalPeerID())
+	
 	t.window.ShowAndRun()
 }
 
@@ -117,6 +124,7 @@ func (t *TrustDropApp) setupUI() {
 		t.transferManager.CancelTransfer()
 		t.hideProgress()
 		t.enableControls()
+		t.statusLabel.SetText("Status: Transfer cancelled")
 	})
 	t.cancelBtn.Importance = widget.DangerImportance
 	t.cancelBtn.Hide()
@@ -295,19 +303,26 @@ func (t *TrustDropApp) onExportSecurityLog() {
 }
 
 func (t *TrustDropApp) onStartReceive() {
-	peerID := t.peerIDEntry.Text
+	peerID := strings.TrimSpace(t.peerIDEntry.Text)
 	if peerID == "" {
 		dialog.ShowError(fmt.Errorf("please enter the sender's code"), t.window)
 		return
 	}
 
+	fmt.Printf("Starting receive with peer ID: %s\n", peerID)
+
 	// Start receiving
 	t.disableControls()
+	t.statusLabel.SetText("Status: Connecting to sender...")
+	
 	go func() {
 		err := t.transferManager.StartReceive(peerID)
 		if err != nil {
-			dialog.ShowError(err, t.window)
+			fmt.Printf("Receive error: %v\n", err)
+			t.window.Canvas().Refresh(t.statusLabel)
+			dialog.ShowError(fmt.Errorf("failed to receive: %v", err), t.window)
 			t.enableControls()
+			t.statusLabel.SetText(fmt.Sprintf("Status: Failed - %v", err))
 		}
 	}()
 }
@@ -346,6 +361,7 @@ func (t *TrustDropApp) onSelectFiles() {
 			return
 		}
 
+		fmt.Printf("Selected path for sending: %s\n", path)
 		t.startSend(path)
 	}, t.window)
 }
@@ -368,19 +384,29 @@ func (t *TrustDropApp) startSend(path string) {
 	t.currentFileLabel.SetText("Preparing transfer...")
 	t.remainingLabel.SetText("Analyzing files...")
 	t.progressBar.SetValue(0)
+	t.statusLabel.SetText("Status: Preparing to send...")
+
+	// Show the peer ID that receiver needs to use
+	dialog.ShowInformation("Ready to Send", 
+		fmt.Sprintf("Your Peer ID: %s\n\nThe receiver must enter this code to receive the files.", 
+			t.transferManager.GetLocalPeerID()), 
+		t.window)
 
 	// Start the transfer
 	go func() {
 		err := t.transferManager.SendFiles([]string{path})
 		if err != nil {
-			dialog.ShowError(err, t.window)
+			fmt.Printf("Send error: %v\n", err)
+			dialog.ShowError(fmt.Errorf("failed to send: %v", err), t.window)
 			t.enableControls()
 			t.hideProgress()
+			t.statusLabel.SetText(fmt.Sprintf("Status: Failed - %v", err))
 		}
 	}()
 }
 
 func (t *TrustDropApp) onStatusUpdate(status string) {
+	fmt.Printf("Status update: %s\n", status)
 	t.statusLabel.SetText("Status: " + status)
 
 	// Show progress during active transfers

@@ -15,5 +15,24 @@
     "previous_hash": "0",
     "hash": "38f1e3c80c5209696e264894e0e880c517aaeb01775175a3abb625ce8a807af5",
     "nonce": 0
+  },
+  {
+    "index": 1,
+    "timestamp": "2025-06-06T23:52:16.589889-05:00",
+    "data": {
+      "transfer_id": "473e5c9e124ad9df",
+      "peer_id": "1104-egypt-twist-edison",
+      "file_name": ".DS_Store",
+      "file_size": 8196,
+      "file_hash": "",
+      "direction": "send",
+      "status": "cancelled",
+      "error": "User cancelled",
+      "duration": "10.844770666s",
+      "timestamp": "2025-06-06T23:52:16.589868-05:00"
+    },
+    "previous_hash": "38f1e3c80c5209696e264894e0e880c517aaeb01775175a3abb625ce8a807af5",
+    "hash": "00fe4fdff31f27a6f3b0c7a8af318683a7f09cab051516087a0caf2e8c0c2a39",
+    "nonce": 331
   }
 ]
