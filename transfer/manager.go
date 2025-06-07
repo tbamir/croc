@@ -3,6 +3,8 @@ package transfer
 import (
 	"fmt"
 	"sync"
+	"time"
+	"trustdrop/logging"
 
 	"github.com/schollz/croc/v10/src/croc"
 	"github.com/schollz/croc/v10/src/utils"
@@ -17,6 +19,10 @@ type TransferManager struct {
 	isSending     bool
 	currentSecret string
 	crocClient    *croc.Client
+	logger        *logging.Logger
+	transferStart time.Time
+	currentFile   string
+	currentSize   int64
 }
 
 type TransferProgress struct {
@@ -27,15 +33,22 @@ type TransferProgress struct {
 	TotalBytes       int64
 }
 
-func NewTransferManager() *TransferManager {
+func NewTransferManager() (*TransferManager, error) {
 	// Generate local peer ID using croc's method
 	localPeerID := utils.GetRandomName()
+
+	// Initialize logger with blockchain
+	logger, err := logging.NewLogger()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize logger: %w", err)
+	}
 
 	return &TransferManager{
 		localPeerID: localPeerID,
 		isReceiving: false,
 		isSending:   false,
-	}
+		logger:      logger,
+	}, nil
 }
 
 func (tm *TransferManager) GetLocalPeerID() string {
@@ -67,6 +80,7 @@ func (tm *TransferManager) StartReceive(peerSecret string) error {
 
 	tm.currentSecret = peerSecret
 	tm.isReceiving = true
+	tm.transferStart = time.Now()
 
 	if tm.statusCb != nil {
 		tm.statusCb("Waiting for sender...")
@@ -88,6 +102,14 @@ func (tm *TransferManager) SendFiles(paths []string) error {
 	}
 
 	tm.isSending = true
+	tm.transferStart = time.Now()
+
+	// Store file info for logging
+	if len(paths) > 0 {
+		tm.currentFile = paths[0]
+		// In production, calculate actual file size
+		tm.currentSize = 0
+	}
 
 	if tm.statusCb != nil {
 		tm.statusCb("Preparing files...")
@@ -102,6 +124,19 @@ func (tm *TransferManager) SendFiles(paths []string) error {
 func (tm *TransferManager) receiveFiles() {
 	defer func() {
 		tm.mutex.Lock()
+		
+		// Log the transfer to blockchain
+		duration := time.Since(tm.transferStart).String()
+		status := "success"
+		errorMsg := ""
+		
+		if tm.statusCb != nil && tm.currentFile == "" {
+			status = "failed"
+			errorMsg = "No files received"
+		}
+		
+		tm.logTransfer(tm.currentSecret, tm.currentFile, tm.currentSize, "receive", status, errorMsg, duration)
+		
 		tm.isReceiving = false
 		tm.currentSecret = ""
 		tm.crocClient = nil
@@ -151,12 +186,30 @@ func (tm *TransferManager) receiveFiles() {
 		if tm.statusCb != nil {
 			tm.statusCb("Files received successfully!")
 		}
+		// Update file info from successful transfer
+		if len(c.FilesToTransfer) > 0 {
+			tm.currentFile = c.FilesToTransfer[0].Name
+			tm.currentSize = c.FilesToTransfer[0].Size
+		}
 	}
 }
 
 func (tm *TransferManager) sendFiles(paths []string) {
 	defer func() {
 		tm.mutex.Lock()
+		
+		// Log the transfer to blockchain
+		duration := time.Since(tm.transferStart).String()
+		status := "success"
+		errorMsg := ""
+		
+		if tm.crocClient == nil || !tm.crocClient.SuccessfulTransfer {
+			status = "failed"
+			errorMsg = "Transfer failed"
+		}
+		
+		tm.logTransfer(tm.localPeerID, tm.currentFile, tm.currentSize, "send", status, errorMsg, duration)
+		
 		tm.isSending = false
 		tm.crocClient = nil
 		tm.mutex.Unlock()
@@ -169,6 +222,12 @@ func (tm *TransferManager) sendFiles(paths []string) {
 			tm.statusCb(fmt.Sprintf("Failed to analyze files: %v", err))
 		}
 		return
+	}
+
+	// Update file info for logging
+	if len(filesInfo) > 0 {
+		tm.currentFile = filesInfo[0].Name
+		tm.currentSize = filesInfo[0].Size
 	}
 
 	// Create croc options for sending
@@ -219,6 +278,25 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	}
 }
 
+// logTransfer logs the transfer to the blockchain
+func (tm *TransferManager) logTransfer(peerID, fileName string, fileSize int64, direction, status, errorMsg, duration string) {
+	log := logging.TransferLog{
+		Timestamp: time.Now(),
+		PeerID:    peerID,
+		FileName:  fileName,
+		FileSize:  fileSize,
+		Direction: direction,
+		Status:    status,
+		Error:     errorMsg,
+		Duration:  duration,
+	}
+
+	if err := tm.logger.LogTransfer(log); err != nil {
+		// Log error but don't fail the transfer
+		fmt.Printf("Failed to log transfer to blockchain: %v\n", err)
+	}
+}
+
 // IsTransferActive returns true if any transfer is in progress
 func (tm *TransferManager) IsTransferActive() bool {
 	tm.mutex.RLock()
@@ -231,6 +309,16 @@ func (tm *TransferManager) CancelTransfer() {
 	tm.mutex.Lock()
 	defer tm.mutex.Unlock()
 
+	// Log cancelled transfer
+	if tm.isReceiving || tm.isSending {
+		direction := "receive"
+		if tm.isSending {
+			direction = "send"
+		}
+		duration := time.Since(tm.transferStart).String()
+		tm.logTransfer(tm.localPeerID, tm.currentFile, tm.currentSize, direction, "cancelled", "User cancelled", duration)
+	}
+
 	tm.isReceiving = false
 	tm.isSending = false
 	tm.currentSecret = ""
@@ -242,4 +330,9 @@ func (tm *TransferManager) CancelTransfer() {
 	if tm.statusCb != nil {
 		tm.statusCb("Transfer cancelled")
 	}
+}
+
+// GetLogger returns the logger instance for external use
+func (tm *TransferManager) GetLogger() *logging.Logger {
+	return tm.logger
 }

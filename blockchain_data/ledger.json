@@ -1,0 +1,19 @@
+[
+  {
+    "index": 0,
+    "timestamp": "2025-06-05T16:58:20.371362-05:00",
+    "data": {
+      "transfer_id": "genesis",
+      "peer_id": "system",
+      "file_name": "Genesis Block",
+      "file_size": 0,
+      "file_hash": "",
+      "direction": "system",
+      "status": "genesis",
+      "timestamp": "2025-06-05T16:58:20.371362-05:00"
+    },
+    "previous_hash": "0",
+    "hash": "38f1e3c80c5209696e264894e0e880c517aaeb01775175a3abb625ce8a807af5",
+    "nonce": 0
+  }
+]

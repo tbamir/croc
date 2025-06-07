@@ -5,10 +5,20 @@ package main
 //go:generate git tag -af v$VERSION -m "v$VERSION"
 
 import (
+	"fmt"
+	"log"
 	"trustdrop/gui"
 )
 
 func main() {
-	app := gui.NewTrustDropApp()
+	app, err := gui.NewTrustDropApp()
+	if err != nil {
+		log.Fatalf("Failed to initialize TrustDrop: %v", err)
+	}
+	
+	fmt.Println("TrustDrop - Secure Blockchain File Transfer")
+	fmt.Println("==========================================")
+	fmt.Println("Starting application...")
+	
 	app.Run()
 }

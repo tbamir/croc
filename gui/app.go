@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"trustdrop/transfer"
@@ -28,31 +29,43 @@ type TrustDropApp struct {
 	currentFileLabel *widget.Label
 	remainingLabel   *widget.Label
 	cancelBtn        *widget.Button
+	
+	// Advanced/Security features
+	securityStatus   *widget.Label
+	checkSecurityBtn *widget.Button
+	exportLogBtn     *widget.Button
+	advancedSection  *widget.Card
+	showAdvanced     bool
+	toggleAdvanced   *widget.Button
 
 	transferManager *transfer.TransferManager
 }
 
-func NewTrustDropApp() *TrustDropApp {
+func NewTrustDropApp() (*TrustDropApp, error) {
 	myApp := app.New()
 	myApp.SetIcon(fyne.NewStaticResource("icon", []byte{})) // TODO: Add actual icon
 
-	window := myApp.NewWindow("TrustDrop")
-	window.Resize(fyne.NewSize(450, 380))
+	window := myApp.NewWindow("TrustDrop - Secure File Transfer")
+	window.Resize(fyne.NewSize(450, 400))
 	window.CenterOnScreen()
 
-	transferManager := transfer.NewTransferManager()
+	transferManager, err := transfer.NewTransferManager()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create transfer manager: %w", err)
+	}
 
 	app := &TrustDropApp{
 		app:             myApp,
 		window:          window,
 		transferManager: transferManager,
+		showAdvanced:    false, // Hidden by default
 	}
 
 	// Set up callbacks
 	transferManager.SetStatusCallback(app.onStatusUpdate)
 	transferManager.SetProgressCallback(app.onProgressUpdate)
 
-	return app
+	return app, nil
 }
 
 func (t *TrustDropApp) Run() {
@@ -89,15 +102,15 @@ func (t *TrustDropApp) setupUI() {
 
 	// Progress bar
 	t.progressBar = widget.NewProgressBar()
-	t.progressBar.Hide() // Hide initially
+	t.progressBar.Hide()
 
 	// Current file label
 	t.currentFileLabel = widget.NewLabel("")
-	t.currentFileLabel.Hide() // Hide initially
+	t.currentFileLabel.Hide()
 
 	// Remaining files label
 	t.remainingLabel = widget.NewLabel("")
-	t.remainingLabel.Hide() // Hide initially
+	t.remainingLabel.Hide()
 
 	// Cancel button
 	t.cancelBtn = widget.NewButton("Cancel Transfer", func() {
@@ -108,7 +121,22 @@ func (t *TrustDropApp) setupUI() {
 	t.cancelBtn.Importance = widget.DangerImportance
 	t.cancelBtn.Hide()
 
-	// Create sections with improved layout
+	// Advanced toggle button (subtle, at bottom)
+	t.toggleAdvanced = widget.NewButtonWithIcon("Security", theme.SettingsIcon(), t.toggleAdvancedSection)
+	t.toggleAdvanced.Importance = widget.LowImportance
+
+	// Security status with friendly language
+	t.securityStatus = widget.NewLabelWithStyle("✅ All transfers are secured and logged", 
+		fyne.TextAlignCenter, fyne.TextStyle{Italic: true})
+
+	// User-friendly button names
+	t.checkSecurityBtn = widget.NewButton("Check Security", t.onCheckSecurity)
+	t.checkSecurityBtn.Importance = widget.LowImportance
+
+	t.exportLogBtn = widget.NewButton("Export Security Log", t.onExportSecurityLog)
+	t.exportLogBtn.Importance = widget.LowImportance
+
+	// Create main sections
 	yourIDSection := widget.NewCard("Your Peer ID", "Share this code with others to send you files:",
 		container.NewVBox(
 			container.NewBorder(nil, nil, nil, t.copyButton, t.localPeerIDLabel),
@@ -142,8 +170,21 @@ func (t *TrustDropApp) setupUI() {
 		),
 	)
 
-	// Main layout with improved spacing
-	content := container.NewVBox(
+	// Advanced security section (hidden by default)
+	t.advancedSection = widget.NewCard("Security Details", "",
+		container.NewVBox(
+			t.securityStatus,
+			widget.NewSeparator(),
+			container.NewHBox(
+				t.checkSecurityBtn,
+				t.exportLogBtn,
+			),
+		),
+	)
+	t.advancedSection.Hide() // Hidden by default
+
+	// Main layout
+	mainContent := container.NewVBox(
 		yourIDSection,
 		widget.NewSeparator(),
 		receiveSection,
@@ -151,10 +192,106 @@ func (t *TrustDropApp) setupUI() {
 		sendSection,
 		widget.NewSeparator(),
 		progressSection,
+		t.advancedSection, // Hidden by default
 	)
 
-	scrollableContent := container.NewScroll(content)
-	t.window.SetContent(container.NewPadded(scrollableContent))
+	// Footer with subtle security toggle
+	footer := container.NewBorder(
+		widget.NewSeparator(),
+		nil,
+		nil,
+		t.toggleAdvanced,
+		nil,
+	)
+
+	// Combine everything
+	content := container.NewBorder(
+		nil,
+		footer,
+		nil,
+		nil,
+		container.NewScroll(mainContent),
+	)
+
+	t.window.SetContent(container.NewPadded(content))
+}
+
+func (t *TrustDropApp) toggleAdvancedSection() {
+	t.showAdvanced = !t.showAdvanced
+	if t.showAdvanced {
+		t.advancedSection.Show()
+		t.toggleAdvanced.SetText("Hide Security")
+		t.updateSecurityStatus()
+		// Resize window to accommodate
+		t.window.Resize(fyne.NewSize(450, 500))
+	} else {
+		t.advancedSection.Hide()
+		t.toggleAdvanced.SetText("Security")
+		// Resize back to normal
+		t.window.Resize(fyne.NewSize(450, 400))
+	}
+}
+
+func (t *TrustDropApp) updateSecurityStatus() {
+	logger := t.transferManager.GetLogger()
+	info := logger.GetBlockchainInfo()
+	
+	if info["ledger_healthy"].(bool) {
+		transfers := info["chain_length"].(int) - 1 // Subtract genesis block
+		if transfers < 0 {
+			transfers = 0
+		}
+		t.securityStatus.SetText(fmt.Sprintf("✅ Security log is intact (%d transfers recorded)", transfers))
+	} else {
+		t.securityStatus.SetText("⚠️ Security log needs attention")
+	}
+}
+
+func (t *TrustDropApp) onCheckSecurity() {
+	logger := t.transferManager.GetLogger()
+	valid, err := logger.VerifyLedger()
+	
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("security check failed: %v", err), t.window)
+		return
+	}
+	
+	if valid {
+		info := logger.GetBlockchainInfo()
+		transfers := info["chain_length"].(int) - 1
+		dialog.ShowInformation("Security Check Passed", 
+			fmt.Sprintf("✅ Your transfer history is secure and intact.\n\n%d transfers have been safely recorded.", transfers), 
+			t.window)
+	} else {
+		dialog.ShowError(fmt.Errorf("security log may have been tampered with"), t.window)
+	}
+	
+	t.updateSecurityStatus()
+}
+
+func (t *TrustDropApp) onExportSecurityLog() {
+	dialog.ShowFileSave(func(writer fyne.URIWriteCloser, err error) {
+		if err != nil {
+			dialog.ShowError(err, t.window)
+			return
+		}
+		if writer == nil {
+			return
+		}
+		defer writer.Close()
+		
+		logger := t.transferManager.GetLogger()
+		filename := writer.URI().Path()
+		
+		if err := logger.ExportLedger(filename); err != nil {
+			dialog.ShowError(fmt.Errorf("failed to export security log: %v", err), t.window)
+			return
+		}
+		
+		dialog.ShowInformation("Export Complete", 
+			"Your security log has been exported successfully!", 
+			t.window)
+	}, t.window)
 }
 
 func (t *TrustDropApp) onStartReceive() {
@@ -259,9 +396,16 @@ func (t *TrustDropApp) onStatusUpdate(status string) {
 		t.hideProgress()
 		t.enableControls()
 		
+		// Update security status if advanced section is visible
+		if t.showAdvanced {
+			t.updateSecurityStatus()
+		}
+		
 		// Show completion dialog for successful transfers
 		if strings.Contains(status, "successfully") {
-			dialog.ShowInformation("Transfer Complete", status, t.window)
+			dialog.ShowInformation("Transfer Complete", 
+				"Your files have been transferred successfully and securely!", 
+				t.window)
 		}
 	}
 }
@@ -291,10 +435,18 @@ func (t *TrustDropApp) disableControls() {
 	t.connectBtn.Disable()
 	t.selectBtn.Disable()
 	t.peerIDEntry.Disable()
+	if t.showAdvanced {
+		t.checkSecurityBtn.Disable()
+		t.exportLogBtn.Disable()
+	}
 }
 
 func (t *TrustDropApp) enableControls() {
 	t.connectBtn.Enable()
 	t.selectBtn.Enable()
 	t.peerIDEntry.Enable()
+	if t.showAdvanced {
+		t.checkSecurityBtn.Enable()
+		t.exportLogBtn.Enable()
+	}
 }
