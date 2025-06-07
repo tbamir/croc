@@ -168,5 +168,36 @@
     "direction": "send",
     "status": "success",
     "duration": "3m55.312372083s"
+  },
+  {
+    "timestamp": "2025-06-07T16:26:01.434535-05:00",
+    "peer_id": "7776-effect-social-lazarus",
+    "file_name": "/Users/amirbeheshti/Desktop/Work/MassSpec",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "failed",
+    "error": "Transfer failed",
+    "duration": "30.585985833s"
+  },
+  {
+    "timestamp": "2025-06-07T16:28:44.587775-05:00",
+    "peer_id": "0584-bottle-oregano-nurse",
+    "file_name": "/Users/amirbeheshti/Desktop/Work/SequestBio",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "success",
+    "duration": "13.560839709s"
+  },
+  {
+    "timestamp": "2025-06-07T16:32:04.172644-05:00",
+    "peer_id": "5423-nina-sonata-texas",
+    "file_name": "/Users/amirbeheshti/Desktop/School/CSCE 4901",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "success",
+    "duration": "12.469034208s"
   }
 ]

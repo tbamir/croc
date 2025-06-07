@@ -5,7 +5,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"trustdrop/assets"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -47,7 +46,7 @@ func NewTrustDropApp() (*TrustDropApp, error) {
 	myApp := app.New()
 
 	// Set the icon using the fixed icon data
-	myApp.SetIcon(assets.GetAppIcon())
+	// myApp.SetIcon(assets.GetAppIcon()) // Temporarily disabled due to PNG checksum error
 
 	window := myApp.NewWindow("TrustDrop - Secure File Transfer")
 	window.Resize(fyne.NewSize(450, 400))

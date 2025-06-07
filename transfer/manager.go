@@ -547,13 +547,18 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		}
 
 		if fileInfo.IsDir() {
+			fmt.Printf("TransferManager: Walking directory: %s\n", path)
 			// Walk through directory and collect all files
 			err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 				if err != nil {
+					fmt.Printf("TransferManager: Walk error for %s: %v\n", filePath, err)
 					return err
 				}
 				if !info.IsDir() {
+					fmt.Printf("TransferManager: Found file: %s (size: %d)\n", filePath, info.Size())
 					filesToEncrypt = append(filesToEncrypt, filePath)
+				} else {
+					fmt.Printf("TransferManager: Skipping directory: %s\n", filePath)
 				}
 				return nil
 			})
@@ -563,8 +568,14 @@ func (tm *TransferManager) sendFiles(paths []string) {
 			}
 		} else {
 			// Single file
+			fmt.Printf("TransferManager: Adding single file: %s\n", path)
 			filesToEncrypt = append(filesToEncrypt, path)
 		}
+	}
+
+	fmt.Printf("TransferManager: Total files found: %d\n", len(filesToEncrypt))
+	for i, file := range filesToEncrypt {
+		fmt.Printf("TransferManager: File %d: %s\n", i+1, file)
 	}
 
 	if len(filesToEncrypt) == 0 {
@@ -606,7 +617,9 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		}
 
 		// Generate anonymized filename
-		anonymizedName := hex.EncodeToString(sha256.New().Sum([]byte(filePath + hash)))[:32]
+		hasher := sha256.New()
+		hasher.Write([]byte(filePath + hash))
+		anonymizedName := hex.EncodeToString(hasher.Sum(nil))[:32]
 
 		// Create encrypted file path
 		encFile := filepath.Join(tempDir, anonymizedName)

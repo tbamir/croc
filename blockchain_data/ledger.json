@@ -313,5 +313,60 @@
     "previous_hash": "00385e92eec0198a80a8f35423b0a7a1d2e7e091a23229b2cbc7128f5cdd6028",
     "hash": "0033336ee3c86b873785f09df69600a3b69e9207d56a0c3070aec01e39511508",
     "nonce": 37
+  },
+  {
+    "index": 17,
+    "timestamp": "2025-06-07T16:26:01.434549-05:00",
+    "data": {
+      "transfer_id": "a87b11adb073add8",
+      "peer_id": "7776-effect-social-lazarus",
+      "file_name": "/Users/amirbeheshti/Desktop/Work/MassSpec",
+      "file_size": 0,
+      "file_hash": "",
+      "direction": "send",
+      "status": "failed",
+      "error": "Transfer failed",
+      "duration": "30.585985833s",
+      "timestamp": "2025-06-07T16:26:01.434535-05:00"
+    },
+    "previous_hash": "0033336ee3c86b873785f09df69600a3b69e9207d56a0c3070aec01e39511508",
+    "hash": "0017b5665f4e8bef1b4cdee3e2d8ab4df0d6b41965840eb6c8aa5f64ecae3f33",
+    "nonce": 81
+  },
+  {
+    "index": 18,
+    "timestamp": "2025-06-07T16:28:44.587822-05:00",
+    "data": {
+      "transfer_id": "070ff8caf83f023b",
+      "peer_id": "0584-bottle-oregano-nurse",
+      "file_name": "/Users/amirbeheshti/Desktop/Work/SequestBio",
+      "file_size": 0,
+      "file_hash": "",
+      "direction": "send",
+      "status": "success",
+      "duration": "13.560839709s",
+      "timestamp": "2025-06-07T16:28:44.587775-05:00"
+    },
+    "previous_hash": "0017b5665f4e8bef1b4cdee3e2d8ab4df0d6b41965840eb6c8aa5f64ecae3f33",
+    "hash": "0048f640b44278756051e8d7a6e266d7508373cd9b5124c0d9857acd66911e19",
+    "nonce": 6
+  },
+  {
+    "index": 19,
+    "timestamp": "2025-06-07T16:32:04.172656-05:00",
+    "data": {
+      "transfer_id": "ab7faeb7f78af22c",
+      "peer_id": "5423-nina-sonata-texas",
+      "file_name": "/Users/amirbeheshti/Desktop/School/CSCE 4901",
+      "file_size": 0,
+      "file_hash": "",
+      "direction": "send",
+      "status": "success",
+      "duration": "12.469034208s",
+      "timestamp": "2025-06-07T16:32:04.172644-05:00"
+    },
+    "previous_hash": "0048f640b44278756051e8d7a6e266d7508373cd9b5124c0d9857acd66911e19",
+    "hash": "00a8e6d300df647dc93d8930c98ef4cb118087e6be9ae00f0c3caac24b28cc9c",
+    "nonce": 484
   }
 ]
