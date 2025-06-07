@@ -16,7 +16,7 @@ BUILD_DIR="build"
 mkdir -p $BUILD_DIR
 
 # Common build flags
-BUILD_FLAGS="-v -ldflags '-s -w'"
+LDFLAGS="-s -w"
 
 # Build the main application
 echo "Building main application..."
@@ -25,7 +25,7 @@ if [ "$OS" == "Darwin" ]; then
     echo "Building for macOS..."
     
     # Build the binary
-    go build $BUILD_FLAGS -o $BUILD_DIR/TrustDrop .
+    go build -v -ldflags "$LDFLAGS" -o $BUILD_DIR/TrustDrop .
     
     # Create app bundle
     APP_DIR="$BUILD_DIR/TrustDrop.app"
@@ -91,7 +91,7 @@ EOF
 elif [ "$OS" == "Linux" ]; then
     # Linux build
     echo "Building for Linux..."
-    go build $BUILD_FLAGS -o $BUILD_DIR/trustdrop .
+    go build -v -ldflags "$LDFLAGS" -o $BUILD_DIR/trustdrop .
     
     # Make executable
     chmod +x $BUILD_DIR/trustdrop
@@ -142,7 +142,7 @@ fi
 # Build the ledger viewer tool
 echo "Building ledger viewer..."
 cd cmd/ledger-viewer
-go build $BUILD_FLAGS -o ../../$BUILD_DIR/ledger-viewer .
+go build -v -ldflags "$LDFLAGS" -o ../../$BUILD_DIR/ledger-viewer .
 cd ../..
 
 echo ""
