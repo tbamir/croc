@@ -46,7 +46,6 @@ type TrustDropApp struct {
 	receiveButton *widget.Button
 
 	// Progress elements
-	progressBar  *widget.ProgressBar
 	statusLabel  *widget.Label
 	detailLabel  *widget.Label
 	cancelButton *widget.Button
@@ -62,6 +61,7 @@ type TrustDropApp struct {
 	currentView     string
 	mutex           sync.Mutex
 	isTransferring  bool
+	selectionDialog *dialog.CustomDialog
 }
 
 func NewTrustDropApp() (*TrustDropApp, error) {
@@ -254,15 +254,12 @@ func (t *TrustDropApp) createReceiveView() {
 }
 
 func (t *TrustDropApp) createProgressView() {
-	// Progress bar - FIXED: Will show real progress now
-	t.progressBar = widget.NewProgressBar()
-
 	// Status labels
-	t.statusLabel = widget.NewLabelWithStyle("Connecting...",
+	t.statusLabel = widget.NewLabelWithStyle("Transfer in progress, please wait...",
 		fyne.TextAlignCenter,
 		fyne.TextStyle{Bold: true})
 
-	t.detailLabel = widget.NewLabel("")
+	t.detailLabel = widget.NewLabel("This may take a few moments depending on file size and network speed.")
 	t.detailLabel.Alignment = fyne.TextAlignCenter
 	t.detailLabel.Wrapping = fyne.TextWrapWord
 
@@ -280,9 +277,9 @@ func (t *TrustDropApp) createProgressView() {
 	})
 	t.cancelButton.Importance = widget.DangerImportance
 
-	// Animation placeholder (you could add a spinner here)
-	progressAnimation := canvas.NewText("◐", theme.PrimaryColor())
-	progressAnimation.TextSize = 48
+	// Animation placeholder - spinner-like effect
+	progressAnimation := canvas.NewText("●○○○○", theme.PrimaryColor())
+	progressAnimation.TextSize = 24
 	progressAnimation.Alignment = fyne.TextAlignCenter
 
 	// Layout
@@ -291,7 +288,6 @@ func (t *TrustDropApp) createProgressView() {
 		widget.NewSeparator(),
 		container.NewPadded(container.NewVBox(
 			t.statusLabel,
-			t.progressBar,
 			t.detailLabel,
 			layout.NewSpacer(),
 			container.NewCenter(t.cancelButton),
@@ -380,9 +376,8 @@ func (t *TrustDropApp) resetTransferState() {
 	t.isTransferring = false
 	t.selectButton.Enable()
 	t.waitingLabel.Hide()
-	t.progressBar.SetValue(0)
-	t.statusLabel.SetText("Connecting...")
-	t.detailLabel.SetText("")
+	t.statusLabel.SetText("Transfer in progress, please wait...")
+	t.detailLabel.SetText("This may take a few moments depending on file size and network speed.")
 
 	// Reset success view elements
 	t.locationLabel.Hide()
@@ -422,7 +417,6 @@ func (t *TrustDropApp) showProgressView() {
 	t.isTransferring = true
 	t.mutex.Unlock()
 
-	t.progressBar.SetValue(0)
 	t.window.SetContent(container.NewPadded(t.progressCard))
 }
 
@@ -448,15 +442,21 @@ func (t *TrustDropApp) showSuccessView(message string) {
 	t.window.SetContent(container.NewPadded(t.successCard))
 }
 
-// FIXED: Simplified file/folder selection
+// FIXED: Simplified file/folder selection with auto-closing dialog
 func (t *TrustDropApp) onSelectFiles() {
 	// Create a choice dialog with clear options
 	filesBtn := widget.NewButtonWithIcon("Select File(s)", theme.DocumentIcon(), func() {
+		if t.selectionDialog != nil {
+			t.selectionDialog.Hide()
+		}
 		t.selectSingleFile()
 	})
 	filesBtn.Importance = widget.HighImportance
 
 	folderBtn := widget.NewButtonWithIcon("Select Folder", theme.FolderIcon(), func() {
+		if t.selectionDialog != nil {
+			t.selectionDialog.Hide()
+		}
 		t.selectFolder()
 	})
 	folderBtn.Importance = widget.MediumImportance
@@ -469,7 +469,8 @@ func (t *TrustDropApp) onSelectFiles() {
 		widget.NewLabel("Note: You can select files one by one if needed"),
 	)
 
-	dialog.NewCustom("Choose Transfer Type", "Cancel", content, t.window).Show()
+	t.selectionDialog = dialog.NewCustom("Choose Transfer Type", "Cancel", content, t.window)
+	t.selectionDialog.Show()
 }
 
 // FIXED: Single file selection method - CRITICAL FIX HERE
@@ -620,36 +621,22 @@ func (t *TrustDropApp) onStatusUpdate(status string) {
 	}
 }
 
-// FIXED: Real progress tracking that actually updates the progress bar
+// FIXED: Simplified progress updates - no progress bar, just status messages
 func (t *TrustDropApp) onProgressUpdate(progress transfer.TransferProgress) {
 	t.mutex.Lock()
 	currentView := t.currentView
 	t.mutex.Unlock()
 
 	if currentView == "progress" {
-		// FIXED: Update progress bar with actual values
-		progressValue := progress.PercentComplete / 100.0
-		if progressValue > 1.0 {
-			progressValue = 1.0
-		}
-		if progressValue < 0.0 {
-			progressValue = 0.0
-		}
-
-		t.progressBar.SetValue(progressValue)
-
-		// Update detail label with current file
+		// Update detail label with current file info
 		if progress.CurrentFile != "" {
 			fileName := filepath.Base(progress.CurrentFile)
 			if progress.FilesRemaining > 0 {
-				t.detailLabel.SetText(fmt.Sprintf("%s\n(%d files remaining)\n%.1f%% complete",
-					fileName, progress.FilesRemaining, progress.PercentComplete))
+				t.detailLabel.SetText(fmt.Sprintf("Processing: %s\n(%d files remaining)",
+					fileName, progress.FilesRemaining))
 			} else {
-				t.detailLabel.SetText(fmt.Sprintf("%s\n%.1f%% complete",
-					fileName, progress.PercentComplete))
+				t.detailLabel.SetText(fmt.Sprintf("Processing: %s", fileName))
 			}
-		} else {
-			t.detailLabel.SetText(fmt.Sprintf("%.1f%% complete", progress.PercentComplete))
 		}
 
 		// Update status for different stages with better feedback
