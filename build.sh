@@ -30,7 +30,53 @@ if [ "$OS" == "Darwin" ]; then
     # Make the binary executable
     chmod +x $BUILD_DIR/TrustDrop
     
-    echo "macOS binary created at: $BUILD_DIR/TrustDrop"
+    # Create proper macOS app bundle to prevent terminal from showing
+    APP_NAME="TrustDrop"
+    APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
+    
+    echo "Creating macOS app bundle..."
+    
+    # Create app bundle structure
+    mkdir -p "$APP_BUNDLE/Contents/MacOS"
+    mkdir -p "$APP_BUNDLE/Contents/Resources"
+    
+    # Move binary to app bundle
+    mv "$BUILD_DIR/TrustDrop" "$APP_BUNDLE/Contents/MacOS/TrustDrop"
+    
+    # Create Info.plist
+    cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>TrustDrop</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.trustdrop.app</string>
+    <key>CFBundleName</key>
+    <string>TrustDrop</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.13</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSUIElement</key>
+    <false/>
+</dict>
+</plist>
+EOF
+    
+    echo "macOS app bundle created at: $APP_BUNDLE"
+    echo "You can now double-click TrustDrop.app to run without terminal!"
     
     # Create a DMG (optional)
     if command -v create-dmg &> /dev/null; then
@@ -42,7 +88,7 @@ if [ "$OS" == "Darwin" ]; then
             --icon-size 100 \
             --app-drop-link 600 185 \
             "$BUILD_DIR/TrustDrop.dmg" \
-            "$BUILD_DIR/TrustDrop"
+            "$APP_BUNDLE"
         echo "DMG created at: $BUILD_DIR/TrustDrop.dmg"
     else
         echo "Note: Install create-dmg to build DMG installer (brew install create-dmg)"
@@ -112,7 +158,8 @@ echo "Ledger viewer: $BUILD_DIR/ledger-viewer"
 echo ""
 echo "To run TrustDrop:"
 if [ "$OS" == "Darwin" ]; then
-    echo "  open $BUILD_DIR/TrustDrop"
+    echo "  Double-click: $BUILD_DIR/TrustDrop.app (recommended)"
+    echo "  Command line: open $BUILD_DIR/TrustDrop.app"
 else
     echo "  ./$BUILD_DIR/trustdrop"
 fi
