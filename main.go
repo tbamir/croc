@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"trustdrop/gui"
 	"trustdrop/internal"
@@ -12,6 +13,23 @@ import (
 func main() {
 	// Set up better logging
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	// Fix working directory for macOS .app bundles
+	if runtime.GOOS == "darwin" {
+		// When launched as .app bundle, working directory might be wrong
+		if execPath, err := os.Executable(); err == nil {
+			// Check if we're running from a .app bundle
+			if filepath.Base(filepath.Dir(execPath)) == "MacOS" {
+				// We're in .app/Contents/MacOS/, move to .app/Contents/Resources/
+				resourcesDir := filepath.Join(filepath.Dir(filepath.Dir(execPath)), "Resources")
+				if _, err := os.Stat(resourcesDir); err == nil {
+					// Resources dir exists, but we should use the parent of .app
+					appDir := filepath.Dir(filepath.Dir(filepath.Dir(execPath)))
+					os.Chdir(appDir)
+				}
+			}
+		}
+	}
 
 	// Only show console output in debug mode
 	if os.Getenv("DEBUG") != "" {
@@ -43,11 +61,13 @@ func main() {
 		fmt.Println("")
 	}
 
+	// Create and run the app - this blocks on the main thread
 	app, err := gui.NewTrustDropApp()
 	if err != nil {
 		log.Fatalf("Failed to initialize TrustDrop: %v", err)
 	}
 
+	// This call blocks until the app is closed - critical for .app bundles
 	app.Run()
 }
 

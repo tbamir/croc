@@ -74,7 +74,10 @@ func NewTransferManager() (*TransferManager, error) {
 	// FIXED: Generate stronger local peer ID using secure random
 	localPeerID := generateSecureCode()
 
-	fmt.Printf("TransferManager: Generated local peer ID: %s\n", localPeerID)
+	// Only show debug output when DEBUG environment variable is set
+	if os.Getenv("DEBUG") != "" {
+		fmt.Printf("TransferManager: Generated local peer ID: %s\n", localPeerID)
+	}
 
 	// Initialize logger with blockchain
 	logger, err := logging.NewLogger()
@@ -299,7 +302,9 @@ func (tm *TransferManager) calculateFileHash(filePath string) (string, error) {
 func (tm *TransferManager) receiveFiles() {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("TransferManager: Recovered from panic in receiveFiles: %v\n", r)
+			if os.Getenv("DEBUG") != "" {
+				fmt.Printf("TransferManager: Recovered from panic in receiveFiles: %v\n", r)
+			}
 		}
 
 		tm.mutex.Lock()
@@ -544,7 +549,9 @@ func (tm *TransferManager) fallbackDecryption(files []string, originalDir string
 func (tm *TransferManager) sendFiles(paths []string) {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("TransferManager: Recovered from panic in sendFiles: %v\n", r)
+			if os.Getenv("DEBUG") != "" {
+				fmt.Printf("TransferManager: Recovered from panic in sendFiles: %v\n", r)
+			}
 		}
 
 		tm.mutex.Lock()
@@ -662,7 +669,9 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		// FIXED: Use chunked encryption instead of loading entire file
 		encFile := filepath.Join(tempDir, anonymizedName)
 		if err := tm.encryptFileChunked(filePath, encFile); err != nil {
-			fmt.Printf("TransferManager: Failed to encrypt file %s: %v\n", filePath, err)
+			if os.Getenv("DEBUG") != "" {
+				fmt.Printf("TransferManager: Failed to encrypt file %s: %v\n", filePath, err)
+			}
 			continue
 		}
 
@@ -782,7 +791,9 @@ func (tm *TransferManager) logTransfer(peerID, fileName, fileHash string, fileSi
 	}
 
 	if err := tm.logger.LogTransfer(log); err != nil {
-		fmt.Printf("Failed to log transfer to blockchain: %v\n", err)
+		if os.Getenv("DEBUG") != "" {
+			fmt.Printf("Failed to log transfer to blockchain: %v\n", err)
+		}
 	}
 }
 

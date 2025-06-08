@@ -498,5 +498,24 @@
     "previous_hash": "001acba2c33dbe2937d2ac440c24e1d69b84d713ee8d3733f8e996eaee9b7e03",
     "hash": "0010ad9af57f0b9d21ad57f5851d77c1009e7f00f48a6f39e30d49f35e759c66",
     "nonce": 339
+  },
+  {
+    "index": 27,
+    "timestamp": "2025-06-08T14:21:20.185587-05:00",
+    "data": {
+      "transfer_id": "036241925e3810f7",
+      "peer_id": "sierra-oscar-juliet-24051",
+      "file_name": "Untitled.mp4",
+      "file_size": 12246346,
+      "file_hash": "52c311e05b78342dce397eb181e5ce68a772f9aa03f03828df8a6c73c65993d7",
+      "direction": "send",
+      "status": "cancelled",
+      "error": "User cancelled",
+      "duration": "12.048029167s",
+      "timestamp": "2025-06-08T14:21:20.185576-05:00"
+    },
+    "previous_hash": "0010ad9af57f0b9d21ad57f5851d77c1009e7f00f48a6f39e30d49f35e759c66",
+    "hash": "00c2deb3f0350549da06fef871910445b5055d19a81280fb49ab80666e500c2b",
+    "nonce": 43
   }
 ]

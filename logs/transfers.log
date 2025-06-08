@@ -273,5 +273,16 @@
     "status": "cancelled",
     "error": "User cancelled",
     "duration": "5m51.397719542s"
+  },
+  {
+    "timestamp": "2025-06-08T14:21:20.185576-05:00",
+    "peer_id": "sierra-oscar-juliet-24051",
+    "file_name": "Untitled.mp4",
+    "file_hash": "52c311e05b78342dce397eb181e5ce68a772f9aa03f03828df8a6c73c65993d7",
+    "file_size": 12246346,
+    "direction": "send",
+    "status": "cancelled",
+    "error": "User cancelled",
+    "duration": "12.048029167s"
   }
 ]
