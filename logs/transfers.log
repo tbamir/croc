@@ -209,5 +209,69 @@
     "direction": "send",
     "status": "success",
     "duration": "25.806695208s"
+  },
+  {
+    "timestamp": "2025-06-07T20:16:56.651961-05:00",
+    "peer_id": "7622-cabinet-spirit-brazil",
+    "file_name": "",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "receive",
+    "status": "failed",
+    "error": "No files received",
+    "duration": "263.60925ms"
+  },
+  {
+    "timestamp": "2025-06-07T20:18:09.911436-05:00",
+    "peer_id": "7622-cabinet-spirit-brazil",
+    "file_name": "",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "receive",
+    "status": "failed",
+    "error": "No files received",
+    "duration": "1.939065041s"
+  },
+  {
+    "timestamp": "2025-06-07T20:20:25.008516-05:00",
+    "peer_id": "2058-export-legal-network",
+    "file_name": "kernelFusion.py",
+    "file_hash": "0dfa7e2c86793df1e61718b2a59bbc7978157ca535fb622ec4ace3c4f1b830aa",
+    "file_size": 22474,
+    "direction": "receive",
+    "status": "success",
+    "duration": "2.191764917s"
+  },
+  {
+    "timestamp": "2025-06-07T20:24:02.765889-05:00",
+    "peer_id": "5461-chef-pablo-proxy",
+    "file_name": "kernelFusion.py",
+    "file_hash": "",
+    "file_size": 22474,
+    "direction": "send",
+    "status": "success",
+    "duration": "2m7.429232625s"
+  },
+  {
+    "timestamp": "2025-06-08T01:09:45.128162-05:00",
+    "peer_id": "6201-denmark-happy-profile",
+    "file_name": ".DS_Store",
+    "file_hash": "261e96842e0547216221ec42075e518e1c8d0284fc886134194dc35f13bea7b2",
+    "file_size": 6148,
+    "direction": "send",
+    "status": "cancelled",
+    "error": "User cancelled",
+    "duration": "3.079675792s"
+  },
+  {
+    "timestamp": "2025-06-08T01:18:28.550526-05:00",
+    "peer_id": "6223-before-ingrid-topic",
+    "file_name": "NIBIB-DEBUT-Certification-Form-2025.pdf",
+    "file_hash": "fdde1487213cf36a892f70e510ec34f161b751083e391fa32121fde6bdc6ccad",
+    "file_size": 474176,
+    "direction": "send",
+    "status": "cancelled",
+    "error": "User cancelled",
+    "duration": "5m51.397719542s"
   }
 ]

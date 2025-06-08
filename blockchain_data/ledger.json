@@ -386,5 +386,117 @@
     "previous_hash": "00a8e6d300df647dc93d8930c98ef4cb118087e6be9ae00f0c3caac24b28cc9c",
     "hash": "006c5d6525118a5129ea18c8cbbe6bfaca6d6836b6e59bdd2ff6e87337e2a97d",
     "nonce": 323
+  },
+  {
+    "index": 21,
+    "timestamp": "2025-06-07T20:16:56.651972-05:00",
+    "data": {
+      "transfer_id": "c2f82621fe1be3e5",
+      "peer_id": "7622-cabinet-spirit-brazil",
+      "file_name": "",
+      "file_size": 0,
+      "file_hash": "",
+      "direction": "receive",
+      "status": "failed",
+      "error": "No files received",
+      "duration": "263.60925ms",
+      "timestamp": "2025-06-07T20:16:56.651961-05:00"
+    },
+    "previous_hash": "006c5d6525118a5129ea18c8cbbe6bfaca6d6836b6e59bdd2ff6e87337e2a97d",
+    "hash": "0042007de03a8a0450d0b11c07225f6f27f8a43ae849d74acfc36c6fa29d3f53",
+    "nonce": 344
+  },
+  {
+    "index": 22,
+    "timestamp": "2025-06-07T20:18:09.911457-05:00",
+    "data": {
+      "transfer_id": "dd653d485d2959d0",
+      "peer_id": "7622-cabinet-spirit-brazil",
+      "file_name": "",
+      "file_size": 0,
+      "file_hash": "",
+      "direction": "receive",
+      "status": "failed",
+      "error": "No files received",
+      "duration": "1.939065041s",
+      "timestamp": "2025-06-07T20:18:09.911436-05:00"
+    },
+    "previous_hash": "0042007de03a8a0450d0b11c07225f6f27f8a43ae849d74acfc36c6fa29d3f53",
+    "hash": "0088fa43a044d40d60a5bdbc741b58279bb3cb5b9afcad584f77f8eb67b39fee",
+    "nonce": 249
+  },
+  {
+    "index": 23,
+    "timestamp": "2025-06-07T20:20:25.008521-05:00",
+    "data": {
+      "transfer_id": "a0dc3d930565c178",
+      "peer_id": "2058-export-legal-network",
+      "file_name": "kernelFusion.py",
+      "file_size": 22474,
+      "file_hash": "0dfa7e2c86793df1e61718b2a59bbc7978157ca535fb622ec4ace3c4f1b830aa",
+      "direction": "receive",
+      "status": "success",
+      "duration": "2.191764917s",
+      "timestamp": "2025-06-07T20:20:25.008516-05:00"
+    },
+    "previous_hash": "0088fa43a044d40d60a5bdbc741b58279bb3cb5b9afcad584f77f8eb67b39fee",
+    "hash": "000d51b124967ec1b51e68212069fadb7c740943d0d278016b8c9fc8f8f7a25d",
+    "nonce": 173
+  },
+  {
+    "index": 24,
+    "timestamp": "2025-06-07T20:24:02.765897-05:00",
+    "data": {
+      "transfer_id": "249e81ddcf563595",
+      "peer_id": "5461-chef-pablo-proxy",
+      "file_name": "kernelFusion.py",
+      "file_size": 22474,
+      "file_hash": "",
+      "direction": "send",
+      "status": "success",
+      "duration": "2m7.429232625s",
+      "timestamp": "2025-06-07T20:24:02.765889-05:00"
+    },
+    "previous_hash": "000d51b124967ec1b51e68212069fadb7c740943d0d278016b8c9fc8f8f7a25d",
+    "hash": "0037d0c222a87ff0dddc87349811c8f81d6cbb52fe77e73352fbd85eea10c07e",
+    "nonce": 557
+  },
+  {
+    "index": 25,
+    "timestamp": "2025-06-08T01:09:45.128173-05:00",
+    "data": {
+      "transfer_id": "fec73420427771ba",
+      "peer_id": "6201-denmark-happy-profile",
+      "file_name": ".DS_Store",
+      "file_size": 6148,
+      "file_hash": "261e96842e0547216221ec42075e518e1c8d0284fc886134194dc35f13bea7b2",
+      "direction": "send",
+      "status": "cancelled",
+      "error": "User cancelled",
+      "duration": "3.079675792s",
+      "timestamp": "2025-06-08T01:09:45.128162-05:00"
+    },
+    "previous_hash": "0037d0c222a87ff0dddc87349811c8f81d6cbb52fe77e73352fbd85eea10c07e",
+    "hash": "001acba2c33dbe2937d2ac440c24e1d69b84d713ee8d3733f8e996eaee9b7e03",
+    "nonce": 778
+  },
+  {
+    "index": 26,
+    "timestamp": "2025-06-08T01:18:28.550619-05:00",
+    "data": {
+      "transfer_id": "1ef203ba3acdc99e",
+      "peer_id": "6223-before-ingrid-topic",
+      "file_name": "NIBIB-DEBUT-Certification-Form-2025.pdf",
+      "file_size": 474176,
+      "file_hash": "fdde1487213cf36a892f70e510ec34f161b751083e391fa32121fde6bdc6ccad",
+      "direction": "send",
+      "status": "cancelled",
+      "error": "User cancelled",
+      "duration": "5m51.397719542s",
+      "timestamp": "2025-06-08T01:18:28.550526-05:00"
+    },
+    "previous_hash": "001acba2c33dbe2937d2ac440c24e1d69b84d713ee8d3733f8e996eaee9b7e03",
+    "hash": "0010ad9af57f0b9d21ad57f5851d77c1009e7f00f48a6f39e30d49f35e759c66",
+    "nonce": 339
   }
 ]
