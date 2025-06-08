@@ -2,14 +2,20 @@ package gui
 
 import (
 	"fmt"
+	"image/color"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -18,53 +24,63 @@ import (
 )
 
 type TrustDropApp struct {
-	app              fyne.App
-	window           fyne.Window
-	localPeerIDLabel *widget.Label
-	copyButton       *widget.Button
-	peerIDEntry      *widget.Entry
-	statusLabel      *widget.Label
-	connectBtn       *widget.Button
-	selectBtn        *widget.Button
-	progressBar      *widget.ProgressBar
-	currentFileLabel *widget.Label
-	remainingLabel   *widget.Label
-	cancelBtn        *widget.Button
+	app    fyne.App
+	window fyne.Window
 
-	// Advanced/Security features
-	securityStatus   *widget.Label
-	checkSecurityBtn *widget.Button
-	exportLogBtn     *widget.Button
-	advancedSection  *widget.Card
-	showAdvanced     bool
-	toggleAdvanced   *widget.Button
+	// Main UI elements
+	mainContent     *fyne.Container
+	sendCard        *widget.Card
+	receiveCard     *widget.Card
+	progressCard    *widget.Card
+	successCard     *widget.Card
 
+	// Send elements
+	peerIDDisplay   *widget.Label
+	copyButton      *widget.Button
+	selectButton    *widget.Button
+	waitingLabel    *widget.Label
+
+	// Receive elements
+	codeEntry       *widget.Entry
+	receiveButton   *widget.Button
+
+	// Progress elements
+	progressBar     *widget.ProgressBar
+	statusLabel     *widget.Label
+	detailLabel     *widget.Label
+	cancelButton    *widget.Button
+
+	// Success elements
+	successMessage  *widget.Label
+	doneButton      *widget.Button
+
+	// State
 	transferManager *transfer.TransferManager
+	currentView     string
+	mutex           sync.Mutex
 }
 
 func NewTrustDropApp() (*TrustDropApp, error) {
 	myApp := app.New()
+	myApp.Settings().SetTheme(&trustDropTheme{})
 
-	// Set the icon using the fixed icon data
-	// myApp.SetIcon(assets.GetAppIcon()) // Temporarily disabled due to PNG checksum error
-
-	window := myApp.NewWindow("TrustDrop - Secure File Transfer")
-	window.Resize(fyne.NewSize(450, 400))
+	window := myApp.NewWindow("TrustDrop")
+	window.Resize(fyne.NewSize(420, 500))
 	window.CenterOnScreen()
 
 	transferManager, err := transfer.NewTransferManager()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create transfer manager: %w", err)
+		return nil, fmt.Errorf("failed to initialize: %w", err)
 	}
 
 	app := &TrustDropApp{
 		app:             myApp,
 		window:          window,
 		transferManager: transferManager,
-		showAdvanced:    false, // Hidden by default
+		currentView:     "main",
 	}
 
-	// Set up callbacks with better error handling
+	// Set up callbacks with proper thread safety
 	transferManager.SetStatusCallback(app.onStatusUpdate)
 	transferManager.SetProgressCallback(app.onProgressUpdate)
 
@@ -73,230 +89,328 @@ func NewTrustDropApp() (*TrustDropApp, error) {
 
 func (t *TrustDropApp) Run() {
 	t.setupUI()
-
-	// Show the local peer ID in console for debugging
-	fmt.Printf("TrustDrop started. Your Peer ID: %s\n", t.transferManager.GetLocalPeerID())
-
 	t.window.ShowAndRun()
 }
 
 func (t *TrustDropApp) setupUI() {
-	// Local Peer ID display
-	localPeerID := t.transferManager.GetLocalPeerID()
-	t.localPeerIDLabel = widget.NewLabel(localPeerID)
-	t.localPeerIDLabel.TextStyle = fyne.TextStyle{Monospace: true}
+	// Create all UI cards
+	t.createMainView()
+	t.createSendView()
+	t.createReceiveView()
+	t.createProgressView()
+	t.createSuccessView()
 
-	// Copy button for local peer ID
-	t.copyButton = widget.NewButton("Copy", func() {
-		t.window.Clipboard().SetContent(localPeerID)
-		dialog.ShowInformation("Copied", "Peer ID copied to clipboard!", t.window)
+	// Start with main view
+	t.showMainView()
+}
+
+func (t *TrustDropApp) createMainView() {
+	// App logo/title
+	title := widget.NewLabelWithStyle("TrustDrop", 
+		fyne.TextAlignCenter, 
+		fyne.TextStyle{Bold: true})
+	title.TextStyle.Bold = true
+	
+	subtitle := widget.NewLabel("Secure File Transfer")
+	subtitle.Alignment = fyne.TextAlignCenter
+
+	// Send button - large and prominent
+	sendBtn := widget.NewButton("Send Files", func() {
+		t.showSendView()
 	})
-	t.copyButton.Importance = widget.MediumImportance
+	sendBtn.Importance = widget.HighImportance
 
-	// Peer ID input for connecting to others
-	t.peerIDEntry = widget.NewEntry()
-	t.peerIDEntry.SetPlaceHolder("Enter code from sender")
+	// Receive button - large and prominent  
+	receiveBtn := widget.NewButton("Receive Files", func() {
+		t.showReceiveView()
+	})
+	receiveBtn.Importance = widget.MediumImportance
 
-	// Connect button - now starts receiving
-	t.connectBtn = widget.NewButton("Start Receiving", t.onStartReceive)
-	t.connectBtn.Importance = widget.HighImportance
+	// Simple explanation
+	explanation := widget.NewLabel("Send files securely to anyone,\nanywhere, without the cloud")
+	explanation.Alignment = fyne.TextAlignCenter
+	explanation.Wrapping = fyne.TextWrapWord
 
-	// Status label
-	t.statusLabel = widget.NewLabel("Status: Ready")
+	// Layout
+	content := container.NewVBox(
+		container.NewPadded(container.NewVBox(
+			title,
+			subtitle,
+		)),
+		widget.NewSeparator(),
+		container.NewPadded(container.NewVBox(
+			explanation,
+			layout.NewSpacer(),
+			container.NewGridWithColumns(1,
+				container.NewPadded(sendBtn),
+				container.NewPadded(receiveBtn),
+			),
+		)),
+	)
 
-	// File selection button
-	t.selectBtn = widget.NewButton("Send Files/Folders", t.onSelectFiles)
+	t.mainContent = container.NewCenter(content)
+}
 
+func (t *TrustDropApp) createSendView() {
+	// Your code display
+	t.peerIDDisplay = widget.NewLabelWithStyle(
+		t.transferManager.GetLocalPeerID(),
+		fyne.TextAlignCenter,
+		fyne.TextStyle{Monospace: true, Bold: true})
+
+	t.copyButton = widget.NewButtonWithIcon("Copy Code", theme.ContentCopyIcon(), func() {
+		t.window.Clipboard().SetContent(t.transferManager.GetLocalPeerID())
+		t.copyButton.SetText("Copied!")
+		time.AfterFunc(2*time.Second, func() {
+			t.copyButton.SetText("Copy Code")
+		})
+	})
+
+	// Select files button
+	t.selectButton = widget.NewButton("Choose Files to Send", t.onSelectFiles)
+	t.selectButton.Importance = widget.HighImportance
+	t.selectButton.Icon = theme.FolderOpenIcon()
+
+	// Waiting indicator
+	t.waitingLabel = widget.NewLabel("Share the code above with the receiver")
+	t.waitingLabel.Alignment = fyne.TextAlignCenter
+	t.waitingLabel.Hide()
+
+	// Back button
+	backBtn := widget.NewButtonWithIcon("Back", theme.NavigateBackIcon(), func() {
+		if t.transferManager.IsTransferActive() {
+			dialog.ShowConfirm("Cancel Transfer?", 
+				"Are you sure you want to cancel the current transfer?",
+				func(cancel bool) {
+					if cancel {
+						t.transferManager.CancelTransfer()
+						t.showMainView()
+					}
+				}, t.window)
+		} else {
+			t.showMainView()
+		}
+	})
+
+	// Layout
+	codeCard := widget.NewCard("", "Your Transfer Code:",
+		container.NewVBox(
+			container.NewPadded(t.peerIDDisplay),
+			t.copyButton,
+		))
+
+	content := container.NewVBox(
+		container.NewBorder(nil, nil, backBtn, nil),
+		codeCard,
+		widget.NewSeparator(),
+		container.NewPadded(container.NewVBox(
+			widget.NewLabel("1. Click below to select files"),
+			t.selectButton,
+			widget.NewLabel("2. Share your code with the receiver"),
+			t.waitingLabel,
+		)),
+	)
+
+	t.sendCard = widget.NewCard("Send Files", "", content)
+}
+
+func (t *TrustDropApp) createReceiveView() {
+	// Code entry
+	t.codeEntry = widget.NewEntry()
+	t.codeEntry.SetPlaceHolder("Enter sender's code")
+
+	// Receive button
+	t.receiveButton = widget.NewButton("Start Receiving", func() {
+		code := strings.TrimSpace(t.codeEntry.Text)
+		if code == "" {
+			dialog.ShowError(fmt.Errorf("Please enter the sender's code"), t.window)
+			return
+		}
+		t.onStartReceive(code)
+	})
+	t.receiveButton.Importance = widget.HighImportance
+	t.receiveButton.Icon = theme.DownloadIcon()
+
+	// Back button
+	backBtn := widget.NewButtonWithIcon("Back", theme.NavigateBackIcon(), func() {
+		t.showMainView()
+	})
+
+	// Instructions
+	instructions := widget.NewLabel("Enter the code from the sender\nto receive files")
+	instructions.Alignment = fyne.TextAlignCenter
+	instructions.Wrapping = fyne.TextWrapWord
+
+	// Layout
+	content := container.NewVBox(
+		container.NewBorder(nil, nil, backBtn, nil),
+		instructions,
+		widget.NewSeparator(),
+		container.NewPadded(container.NewVBox(
+			t.codeEntry,
+			t.receiveButton,
+		)),
+	)
+
+	t.receiveCard = widget.NewCard("Receive Files", "", content)
+}
+
+func (t *TrustDropApp) createProgressView() {
 	// Progress bar
 	t.progressBar = widget.NewProgressBar()
-	t.progressBar.Hide()
 
-	// Current file label
-	t.currentFileLabel = widget.NewLabel("")
-	t.currentFileLabel.Hide()
-
-	// Remaining files label
-	t.remainingLabel = widget.NewLabel("")
-	t.remainingLabel.Hide()
+	// Status labels
+	t.statusLabel = widget.NewLabelWithStyle("Connecting...", 
+		fyne.TextAlignCenter, 
+		fyne.TextStyle{Bold: true})
+	
+	t.detailLabel = widget.NewLabel("")
+	t.detailLabel.Alignment = fyne.TextAlignCenter
+	t.detailLabel.Wrapping = fyne.TextWrapWord
 
 	// Cancel button
-	t.cancelBtn = widget.NewButton("Cancel Transfer", func() {
-		t.transferManager.CancelTransfer()
-		t.hideProgress()
-		t.enableControls()
-		t.statusLabel.SetText("Status: Transfer cancelled")
+	t.cancelButton = widget.NewButton("Cancel", func() {
+		dialog.ShowConfirm("Cancel Transfer?",
+			"Are you sure you want to cancel this transfer?",
+			func(cancel bool) {
+				if cancel {
+					t.transferManager.CancelTransfer()
+					t.showMainView()
+				}
+			}, t.window)
 	})
-	t.cancelBtn.Importance = widget.DangerImportance
-	t.cancelBtn.Hide()
+	t.cancelButton.Importance = widget.DangerImportance
 
-	// Advanced toggle button (subtle, at bottom)
-	t.toggleAdvanced = widget.NewButtonWithIcon("Security", theme.SettingsIcon(), t.toggleAdvancedSection)
-	t.toggleAdvanced.Importance = widget.LowImportance
+	// Animation placeholder (you could add a spinner here)
+	progressAnimation := canvas.NewText("◐", theme.PrimaryColor())
+	progressAnimation.TextSize = 48
+	progressAnimation.Alignment = fyne.TextAlignCenter
 
-	// Security status with friendly language
-	t.securityStatus = widget.NewLabelWithStyle("✅ All transfers are secured and logged",
-		fyne.TextAlignCenter, fyne.TextStyle{Italic: true})
-
-	// User-friendly button names
-	t.checkSecurityBtn = widget.NewButton("Check Security", t.onCheckSecurity)
-	t.checkSecurityBtn.Importance = widget.LowImportance
-
-	t.exportLogBtn = widget.NewButton("Export Security Log", t.onExportSecurityLog)
-	t.exportLogBtn.Importance = widget.LowImportance
-
-	// Create main sections
-	yourIDSection := widget.NewCard("Your Peer ID", "Share this code with others to send you files:",
-		container.NewVBox(
-			container.NewBorder(nil, nil, nil, t.copyButton, t.localPeerIDLabel),
-		),
-	)
-
-	receiveSection := widget.NewCard("Receive Files", "",
-		container.NewVBox(
-			widget.NewLabel("Enter sender's code:"),
-			t.peerIDEntry,
-			container.NewPadded(t.connectBtn),
-		),
-	)
-
-	sendSection := widget.NewCard("Send Files", "",
-		container.NewVBox(
-			widget.NewLabel("Select files to send:"),
-			container.NewPadded(t.selectBtn),
-		),
-	)
-
-	progressSection := widget.NewCard("Transfer Status", "",
-		container.NewVBox(
+	// Layout
+	content := container.NewVBox(
+		container.NewPadded(container.NewCenter(progressAnimation)),
+		widget.NewSeparator(),
+		container.NewPadded(container.NewVBox(
 			t.statusLabel,
-			widget.NewSeparator(),
-			widget.NewLabel("Progress:"),
 			t.progressBar,
-			t.currentFileLabel,
-			t.remainingLabel,
-			t.cancelBtn,
-		),
+			t.detailLabel,
+			layout.NewSpacer(),
+			container.NewCenter(t.cancelButton),
+		)),
 	)
 
-	// Advanced security section (hidden by default)
-	t.advancedSection = widget.NewCard("Security Details", "",
-		container.NewVBox(
-			t.securityStatus,
-			widget.NewSeparator(),
-			container.NewHBox(
-				t.checkSecurityBtn,
-				t.exportLogBtn,
-			),
-		),
-	)
-	t.advancedSection.Hide() // Hidden by default
-
-	// Main layout
-	mainContent := container.NewVBox(
-		yourIDSection,
-		widget.NewSeparator(),
-		receiveSection,
-		widget.NewSeparator(),
-		sendSection,
-		widget.NewSeparator(),
-		progressSection,
-		t.advancedSection, // Hidden by default
-	)
-
-	// Footer with subtle security toggle
-	footer := container.NewBorder(
-		widget.NewSeparator(),
-		nil,
-		nil,
-		t.toggleAdvanced,
-		nil,
-	)
-
-	// Combine everything
-	content := container.NewBorder(
-		nil,
-		footer,
-		nil,
-		nil,
-		container.NewScroll(mainContent),
-	)
-
-	t.window.SetContent(container.NewPadded(content))
+	t.progressCard = widget.NewCard("Transfer in Progress", "", content)
 }
 
-func (t *TrustDropApp) onStartReceive() {
-	peerID := strings.TrimSpace(t.peerIDEntry.Text)
-	if peerID == "" {
-		dialog.ShowError(fmt.Errorf("please enter the sender's code"), t.window)
-		return
-	}
+func (t *TrustDropApp) createSuccessView() {
+	// Success icon (checkmark)
+	successIcon := canvas.NewText("✓", theme.SuccessColor())
+	successIcon.TextSize = 72
+	successIcon.Alignment = fyne.TextAlignCenter
 
-	fmt.Printf("Starting receive with peer ID: %s\n", peerID)
+	// Success message
+	t.successMessage = widget.NewLabelWithStyle("Transfer Complete!", 
+		fyne.TextAlignCenter,
+		fyne.TextStyle{Bold: true})
 
-	// Start receiving
-	t.disableControls()
-	t.statusLabel.SetText("Status: Connecting to sender...")
+	// Location label
+	locationLabel := widget.NewLabel("Files saved to:\ndata/received/")
+	locationLabel.Alignment = fyne.TextAlignCenter
 
-	go func() {
-		err := t.transferManager.StartReceive(peerID)
-		if err != nil {
-			fmt.Printf("Receive error: %v\n", err)
-			t.window.Canvas().Refresh(t.statusLabel)
-			dialog.ShowError(fmt.Errorf("failed to receive: %v", err), t.window)
-			t.enableControls()
-			t.statusLabel.SetText(fmt.Sprintf("Status: Failed - %v", err))
-		}
-	}()
+	// Done button
+	t.doneButton = widget.NewButton("Done", func() {
+		t.showMainView()
+	})
+	t.doneButton.Importance = widget.HighImportance
+
+	// Layout
+	content := container.NewVBox(
+		container.NewPadded(container.NewCenter(successIcon)),
+		widget.NewSeparator(),
+		container.NewPadded(container.NewVBox(
+			t.successMessage,
+			locationLabel,
+			layout.NewSpacer(),
+			t.doneButton,
+		)),
+	)
+
+	t.successCard = widget.NewCard("Success", "", content)
 }
 
+// View switching methods
+func (t *TrustDropApp) showMainView() {
+	t.mutex.Lock()
+	t.currentView = "main"
+	t.mutex.Unlock()
+	
+	t.window.SetContent(container.NewPadded(t.mainContent))
+	t.codeEntry.SetText("") // Clear any entered code
+}
+
+func (t *TrustDropApp) showSendView() {
+	t.mutex.Lock()
+	t.currentView = "send"
+	t.mutex.Unlock()
+	
+	t.window.SetContent(container.NewPadded(t.sendCard))
+	t.waitingLabel.Hide()
+}
+
+func (t *TrustDropApp) showReceiveView() {
+	t.mutex.Lock()
+	t.currentView = "receive"
+	t.mutex.Unlock()
+	
+	t.window.SetContent(container.NewPadded(t.receiveCard))
+}
+
+func (t *TrustDropApp) showProgressView() {
+	t.mutex.Lock()
+	t.currentView = "progress"
+	t.mutex.Unlock()
+	
+	t.progressBar.SetValue(0)
+	t.window.SetContent(container.NewPadded(t.progressCard))
+}
+
+func (t *TrustDropApp) showSuccessView(message string) {
+	t.mutex.Lock()
+	t.currentView = "success"
+	t.mutex.Unlock()
+	
+	t.successMessage.SetText(message)
+	t.window.SetContent(container.NewPadded(t.successCard))
+}
+
+// File selection
 func (t *TrustDropApp) onSelectFiles() {
-	if t.transferManager.IsTransferActive() {
-		dialog.ShowError(fmt.Errorf("transfer already in progress"), t.window)
-		return
-	}
-
-	// Create a custom dialog to allow selecting files or folders
-	selectDialog := dialog.NewCustom("Select Files or Folder", "Cancel", container.NewVBox(
-		widget.NewLabel("Choose what to send:"),
-		widget.NewButton("Select Files", func() {
-			t.selectMultipleFiles()
-		}),
-		widget.NewButton("Select Folder", func() {
-			t.selectFolder()
-		}),
-	), t.window)
-	selectDialog.Show()
+	dialog.NewCustom("Select what to send", "Cancel", 
+		container.NewVBox(
+			widget.NewButton("Select Files", func() {
+				t.selectMultipleFiles()
+			}),
+			widget.NewButton("Select Folder", func() {
+				t.selectFolder()
+			}),
+		), t.window).Show()
 }
 
 func (t *TrustDropApp) selectMultipleFiles() {
-	// Create file open dialog
 	fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
-		if err != nil {
-			dialog.ShowError(fmt.Errorf("failed to open file: %v", err), t.window)
-			return
-		}
-		if reader == nil {
+		if err != nil || reader == nil {
 			return
 		}
 		reader.Close()
 
 		path := reader.URI().Path()
-
-		// Handle URI schemes on different platforms
 		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") {
-			// Remove leading slash on Windows paths
 			path = path[1:]
 		}
 
-		fmt.Printf("Selected file for sending: %s\n", path)
-
-		// Note: Fyne doesn't support multiple file selection natively
-		// For now, we'll send single files, but you could implement a custom solution
 		t.startSend([]string{path})
-
 	}, t.window)
 
-	// Set starting directory
 	homeDir, _ := os.UserHomeDir()
 	listableURI := storage.NewFileURI(homeDir)
 	if lister, ok := listableURI.(fyne.ListableURI); ok {
@@ -308,238 +422,208 @@ func (t *TrustDropApp) selectMultipleFiles() {
 
 func (t *TrustDropApp) selectFolder() {
 	dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
-		if err != nil {
-			if strings.Contains(err.Error(), "operation not permitted") {
-				dialog.ShowError(fmt.Errorf("permission denied: cannot access this folder. Please select a folder you have access to, or grant permission in System Preferences > Security & Privacy"), t.window)
-			} else {
-				dialog.ShowError(fmt.Errorf("failed to open folder: %v", err), t.window)
+		if err != nil || uri == nil {
+			if err != nil && strings.Contains(err.Error(), "operation not permitted") {
+				dialog.ShowError(fmt.Errorf("Permission denied. Please grant folder access in System Preferences"), t.window)
 			}
-			return
-		}
-		if uri == nil {
 			return
 		}
 
 		path := uri.Path()
-
-		// Handle URI schemes on different platforms
 		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") {
-			// Remove leading slash on Windows paths
 			path = path[1:]
 		}
 
-		// Verify we can access the path
+		// Verify access
 		if _, err := os.Stat(path); err != nil {
-			dialog.ShowError(fmt.Errorf("cannot access folder: %v", err), t.window)
+			dialog.ShowError(fmt.Errorf("Cannot access this folder"), t.window)
 			return
 		}
 
-		fmt.Printf("Selected path for sending: %s\n", path)
 		t.startSend([]string{path})
 	}, t.window)
 }
 
 func (t *TrustDropApp) startSend(paths []string) {
 	if len(paths) == 0 {
-		dialog.ShowError(fmt.Errorf("no files selected"), t.window)
 		return
 	}
 
-	// Verify all paths exist
-	for _, path := range paths {
-		if _, err := os.Stat(path); err != nil {
-			dialog.ShowError(fmt.Errorf("cannot access path %s: %v", path, err), t.window)
-			return
-		}
-	}
+	// Update UI to show waiting state
+	t.selectButton.Disable()
+	t.waitingLabel.Show()
+	t.waitingLabel.SetText("Waiting for receiver to connect...")
 
-	t.disableControls()
-	t.showProgress()
-
-	t.currentFileLabel.SetText("Preparing transfer...")
-	t.remainingLabel.SetText("Encrypting files...")
-	t.progressBar.SetValue(0)
-	t.statusLabel.SetText("Status: Preparing to send...")
-
-	// Show the peer ID that receiver needs to use
-	dialog.ShowInformation("Ready to Send",
-		fmt.Sprintf("Your Peer ID: %s\n\nThe receiver must enter this code to receive the files.\n\nFiles will be encrypted with AES-256 before transfer.",
-			t.transferManager.GetLocalPeerID()),
-		t.window)
-
-	// Start the transfer
+	// Start transfer in background
 	go func() {
 		err := t.transferManager.SendFiles(paths)
 		if err != nil {
-			fmt.Printf("Send error: %v\n", err)
-			fyne.Do(func() {
-				dialog.ShowError(fmt.Errorf("failed to send: %v", err), t.window)
-				t.enableControls()
-				t.hideProgress()
-				t.statusLabel.SetText(fmt.Sprintf("Status: Failed - %v", err))
+			fyne.CurrentApp().SendNotification(&fyne.Notification{
+				Title:   "Transfer Failed",
+				Content: err.Error(),
 			})
+			t.window.Canvas().Content().Refresh()
 		}
 	}()
 }
 
+func (t *TrustDropApp) onStartReceive(code string) {
+	t.showProgressView()
+	t.statusLabel.SetText("Connecting to sender...")
+
+	go func() {
+		err := t.transferManager.StartReceive(code)
+		if err != nil {
+			fyne.CurrentApp().SendNotification(&fyne.Notification{
+				Title:   "Transfer Failed", 
+				Content: err.Error(),
+			})
+			// Return to receive view on error
+			time.Sleep(time.Second) // Brief delay so user sees the error
+			t.showReceiveView()
+		}
+	}()
+}
+
+// Callbacks from transfer manager
 func (t *TrustDropApp) onStatusUpdate(status string) {
-	fmt.Printf("Status update: %s\n", status)
+	t.mutex.Lock()
+	currentView := t.currentView
+	t.mutex.Unlock()
 
-	// All GUI updates must be wrapped in fyne.Do() to run on main thread
-	fyne.Do(func() {
-		// Update status label
-		t.statusLabel.SetText("Status: " + status)
+	// Simplify status messages for users
+	userStatus := t.simplifyStatus(status)
 
-		// Show progress during active transfers
-		if strings.Contains(status, "Waiting") || strings.Contains(status, "Preparing") ||
-			strings.Contains(status, "Connected") || strings.Contains(status, "Sending") ||
-			strings.Contains(status, "Receiving") || strings.Contains(status, "Encrypting") ||
-			strings.Contains(status, "Decrypting") {
-			t.showProgress()
+	// Update UI based on current view
+	switch currentView {
+	case "send":
+		if strings.Contains(status, "Connected") {
+			t.showProgressView()
+			t.statusLabel.SetText("Sending files...")
 		}
-
-		// Hide progress and re-enable controls when transfer is complete or failed
-		if strings.Contains(status, "successfully") || strings.Contains(status, "cancelled") ||
-			strings.Contains(status, "failed") || strings.Contains(status, "Failed") {
-			t.hideProgress()
-			t.enableControls()
-
-			// Update security status if advanced section is visible
-			if t.showAdvanced {
-				t.updateSecurityStatus()
-			}
-
-			// Show completion dialog for successful transfers
-			if strings.Contains(status, "successfully") {
-				message := "Your files have been transferred successfully and securely!"
-				if strings.Contains(status, "decrypted") {
-					message = "Files received and decrypted successfully!\n\nThey are saved in: data/received/"
-				}
-				dialog.ShowInformation("Transfer Complete", message, t.window)
-			}
+	case "receive":
+		if strings.Contains(status, "Waiting") || strings.Contains(status, "Connecting") {
+			// Already in progress view from onStartReceive
 		}
-	})
+	case "progress":
+		t.statusLabel.SetText(userStatus)
+	}
+
+	// Handle completion
+	if strings.Contains(status, "successfully") {
+		var message string
+		if strings.Contains(status, "decrypted") {
+			message = "Files received successfully!\n\nSaved to: data/received/"
+		} else {
+			message = "Files sent successfully!"
+		}
+		t.showSuccessView(message)
+	}
+
+	// Handle cancellation
+	if strings.Contains(status, "cancelled") {
+		t.showMainView()
+	}
 }
 
 func (t *TrustDropApp) onProgressUpdate(progress transfer.TransferProgress) {
-	// All GUI updates must be wrapped in fyne.Do() to run on main thread
-	fyne.Do(func() {
-		// Update progress bar and labels
+	t.mutex.Lock()
+	currentView := t.currentView
+	t.mutex.Unlock()
+
+	if currentView == "progress" {
+		// Update progress bar
 		t.progressBar.SetValue(progress.PercentComplete / 100.0)
-		t.currentFileLabel.SetText("Current File: " + progress.CurrentFile)
-		t.remainingLabel.SetText(fmt.Sprintf("Files Remaining: %d", progress.FilesRemaining))
-	})
-}
 
-func (t *TrustDropApp) showProgress() {
-	t.progressBar.Show()
-	t.currentFileLabel.Show()
-	t.remainingLabel.Show()
-	t.cancelBtn.Show()
-}
-
-func (t *TrustDropApp) hideProgress() {
-	t.progressBar.Hide()
-	t.currentFileLabel.Hide()
-	t.remainingLabel.Hide()
-	t.cancelBtn.Hide()
-	t.progressBar.SetValue(0)
-}
-
-func (t *TrustDropApp) disableControls() {
-	t.connectBtn.Disable()
-	t.selectBtn.Disable()
-	t.peerIDEntry.Disable()
-	if t.showAdvanced {
-		t.checkSecurityBtn.Disable()
-		t.exportLogBtn.Disable()
-	}
-}
-
-func (t *TrustDropApp) enableControls() {
-	t.connectBtn.Enable()
-	t.selectBtn.Enable()
-	t.peerIDEntry.Enable()
-	if t.showAdvanced {
-		t.checkSecurityBtn.Enable()
-		t.exportLogBtn.Enable()
-	}
-}
-
-func (t *TrustDropApp) toggleAdvancedSection() {
-	t.showAdvanced = !t.showAdvanced
-	if t.showAdvanced {
-		t.advancedSection.Show()
-		t.toggleAdvanced.SetText("Hide Security")
-		t.updateSecurityStatus()
-		// Resize window to accommodate
-		t.window.Resize(fyne.NewSize(450, 500))
-	} else {
-		t.advancedSection.Hide()
-		t.toggleAdvanced.SetText("Security")
-		// Resize back to normal
-		t.window.Resize(fyne.NewSize(450, 400))
-	}
-}
-
-func (t *TrustDropApp) updateSecurityStatus() {
-	logger := t.transferManager.GetLogger()
-	info := logger.GetBlockchainInfo()
-
-	if info["ledger_healthy"].(bool) {
-		transfers := info["chain_length"].(int) - 1 // Subtract genesis block
-		if transfers < 0 {
-			transfers = 0
-		}
-		t.securityStatus.SetText(fmt.Sprintf("✅ Security log is intact (%d transfers recorded)", transfers))
-	} else {
-		t.securityStatus.SetText("⚠️ Security log needs attention")
-	}
-}
-
-func (t *TrustDropApp) onCheckSecurity() {
-	logger := t.transferManager.GetLogger()
-	valid, err := logger.VerifyLedger()
-
-	if err != nil {
-		dialog.ShowError(fmt.Errorf("security check failed: %v", err), t.window)
-		return
-	}
-
-	if valid {
-		info := logger.GetBlockchainInfo()
-		transfers := info["chain_length"].(int) - 1
-		dialog.ShowInformation("Security Check Passed",
-			fmt.Sprintf("✅ Your transfer history is secure and intact.\n\n%d transfers have been safely recorded.", transfers),
-			t.window)
-	} else {
-		dialog.ShowError(fmt.Errorf("security log may have been tampered with"), t.window)
-	}
-
-	t.updateSecurityStatus()
-}
-
-func (t *TrustDropApp) onExportSecurityLog() {
-	dialog.ShowFileSave(func(writer fyne.URIWriteCloser, err error) {
-		if err != nil {
-			dialog.ShowError(err, t.window)
-			return
-		}
-		if writer == nil {
-			return
-		}
-		defer writer.Close()
-
-		logger := t.transferManager.GetLogger()
-		filename := writer.URI().Path()
-
-		if err := logger.ExportLedger(filename); err != nil {
-			dialog.ShowError(fmt.Errorf("failed to export security log: %v", err), t.window)
-			return
+		// Update detail label with current file
+		if progress.CurrentFile != "" {
+			fileName := filepath.Base(progress.CurrentFile)
+			if progress.FilesRemaining > 0 {
+				t.detailLabel.SetText(fmt.Sprintf("%s\n(%d files remaining)", 
+					fileName, progress.FilesRemaining))
+			} else {
+				t.detailLabel.SetText(fileName)
+			}
 		}
 
-		dialog.ShowInformation("Export Complete",
-			"Your security log has been exported successfully!",
-			t.window)
-	}, t.window)
+		// Update status for different stages
+		if progress.PercentComplete < 10 {
+			t.statusLabel.SetText("Starting transfer...")
+		} else if progress.PercentComplete < 90 {
+			t.statusLabel.SetText("Transferring files...")
+		} else {
+			t.statusLabel.SetText("Finishing up...")
+		}
+	}
+}
+
+func (t *TrustDropApp) simplifyStatus(status string) string {
+	// Convert technical status messages to user-friendly ones
+	replacements := map[string]string{
+		"Waiting for sender":        "Connecting to sender...",
+		"Preparing files":           "Getting ready...",
+		"Encrypting":                "Securing your files...",
+		"Decrypting":                "Receiving files...",
+		"Connected":                 "Connected! Starting transfer...",
+		"Sending":                   "Sending files...",
+		"Receiving":                 "Receiving files...",
+		"successfully":              "All done!",
+		"failed":                    "Something went wrong",
+		"cancelled":                 "Transfer cancelled",
+		"Connecting to sender":      "Looking for sender...",
+		"Decrypting and restoring": "Organizing received files...",
+	}
+
+	simplified := status
+	for tech, simple := range replacements {
+		if strings.Contains(strings.ToLower(status), strings.ToLower(tech)) {
+			simplified = simple
+			break
+		}
+	}
+
+	return simplified
+}
+
+// Custom theme for a modern, clean look
+type trustDropTheme struct{}
+
+func (t trustDropTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	switch name {
+	case theme.ColorNamePrimary:
+		return color.NRGBA{R: 0x00, G: 0x7A, B: 0xFF, A: 0xFF} // Bright blue
+	case theme.ColorNameButton:
+		return color.NRGBA{R: 0x00, G: 0x7A, B: 0xFF, A: 0xFF}
+	case theme.ColorNameForeground:
+		if variant == theme.VariantLight {
+			return color.NRGBA{R: 0x21, G: 0x21, B: 0x21, A: 0xFF}
+		}
+		return color.NRGBA{R: 0xF0, G: 0xF0, B: 0xF0, A: 0xFF}
+	case theme.ColorNameBackground:
+		if variant == theme.VariantLight {
+			return color.NRGBA{R: 0xFA, G: 0xFA, B: 0xFA, A: 0xFF}
+		}
+		return color.NRGBA{R: 0x1A, G: 0x1A, B: 0x1A, A: 0xFF}
+	}
+	return theme.DefaultTheme().Color(name, variant)
+}
+
+func (t trustDropTheme) Font(style fyne.TextStyle) fyne.Resource {
+	return theme.DefaultTheme().Font(style)
+}
+
+func (t trustDropTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
+	return theme.DefaultTheme().Icon(name)
+}
+
+func (t trustDropTheme) Size(name fyne.ThemeSizeName) float32 {
+	switch name {
+	case theme.SizeNamePadding:
+		return 8
+	case theme.SizeNameInlineIcon:
+		return 24
+	case theme.SizeNameText:
+		return 15
+	}
+	return theme.DefaultTheme().Size(name)
 }

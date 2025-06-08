@@ -368,5 +368,23 @@
     "previous_hash": "0048f640b44278756051e8d7a6e266d7508373cd9b5124c0d9857acd66911e19",
     "hash": "00a8e6d300df647dc93d8930c98ef4cb118087e6be9ae00f0c3caac24b28cc9c",
     "nonce": 484
+  },
+  {
+    "index": 20,
+    "timestamp": "2025-06-07T16:41:50.370983-05:00",
+    "data": {
+      "transfer_id": "340827af9665b32b",
+      "peer_id": "2435-economy-vision-station",
+      "file_name": "/Users/amirbeheshti/Desktop/School/CSCE 4901",
+      "file_size": 0,
+      "file_hash": "",
+      "direction": "send",
+      "status": "success",
+      "duration": "25.806695208s",
+      "timestamp": "2025-06-07T16:41:50.370974-05:00"
+    },
+    "previous_hash": "00a8e6d300df647dc93d8930c98ef4cb118087e6be9ae00f0c3caac24b28cc9c",
+    "hash": "006c5d6525118a5129ea18c8cbbe6bfaca6d6836b6e59bdd2ff6e87337e2a97d",
+    "nonce": 323
   }
 ]

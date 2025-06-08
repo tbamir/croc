@@ -199,5 +199,15 @@
     "direction": "send",
     "status": "success",
     "duration": "12.469034208s"
+  },
+  {
+    "timestamp": "2025-06-07T16:41:50.370974-05:00",
+    "peer_id": "2435-economy-vision-station",
+    "file_name": "/Users/amirbeheshti/Desktop/School/CSCE 4901",
+    "file_hash": "",
+    "file_size": 0,
+    "direction": "send",
+    "status": "success",
+    "duration": "25.806695208s"
   }
 ]
