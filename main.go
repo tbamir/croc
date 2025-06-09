@@ -14,19 +14,20 @@ func main() {
 	// Set up better logging
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	// FIXED: Enhanced working directory setup for all platforms
-	if err := setupWorkingDirectory(); err != nil {
-		log.Printf("Warning: Could not set proper working directory: %v", err)
-		// Continue anyway - use current directory as fallback
+	// FIXED: Force working directory to user's Documents for built applications
+	if err := setupTrustDropWorkingDirectory(); err != nil {
+		log.Printf("Warning: Could not set working directory: %v", err)
+		// Don't exit - try to continue with current directory
 	}
 
-	// Only show console output in debug mode
+	// Always show current working directory in debug mode
 	if os.Getenv("DEBUG") != "" {
 		fmt.Printf("TrustDrop - Secure File Transfer\n")
 		fmt.Printf("===============================\n")
 		fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		fmt.Printf("Go Version: %s\n", runtime.Version())
 		fmt.Printf("Working Directory: %s\n", getCurrentDir())
+		fmt.Printf("Data Directory: %s\n", getDataDirectory())
 		fmt.Printf("\n")
 	}
 
@@ -35,17 +36,30 @@ func main() {
 		log.Fatalf("Failed to create data directories: %v", err)
 	}
 
+	// Verify directories were actually created
+	dataDir := getDataDirectory()
+	if !directoryExists(dataDir) {
+		log.Fatalf("Data directory was not created: %s", dataDir)
+	}
+
+	receivedDir := filepath.Join(dataDir, "received")
+	if !directoryExists(receivedDir) {
+		log.Fatalf("Received directory was not created: %s", receivedDir)
+	}
+
 	// Enable croc debug logging only if DEBUG env var is set
 	if os.Getenv("DEBUG") != "" {
 		os.Setenv("CROC_DEBUG", "1")
 		fmt.Println("Debug mode enabled")
+		fmt.Printf("Data directory: %s\n", dataDir)
+		fmt.Printf("Received files will be saved to: %s\n", receivedDir)
 		fmt.Println("Starting TrustDrop application...")
 		fmt.Println("")
 		fmt.Println("=== USAGE NOTES ===")
 		fmt.Println("• To SEND: Click 'Send Files', copy your code, then select files")
 		fmt.Println("• To RECEIVE: Click 'Receive Files' and enter the sender's code")
 		fmt.Println("• All transfers use AES-256 encryption and blockchain logging")
-		fmt.Println("• Received files are saved to: data/received/")
+		fmt.Printf("• Received files are saved to: %s\n", receivedDir)
 		fmt.Println("===================")
 		fmt.Println("")
 	}
@@ -60,172 +74,49 @@ func main() {
 	app.Run()
 }
 
-// FIXED: Cross-platform working directory setup
-func setupWorkingDirectory() error {
-	execPath, err := os.Executable()
+// FIXED: Simplified working directory setup that always works
+func setupTrustDropWorkingDirectory() error {
+	// Get user's home directory
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	var targetDir string
-
+	// Create TrustDrop directory in Documents (or home on Linux)
+	var trustDropDir string
 	switch runtime.GOOS {
-	case "darwin":
-		targetDir, err = setupMacOSWorkingDirectory(execPath)
-	case "windows":
-		targetDir, err = setupWindowsWorkingDirectory(execPath)
+	case "darwin", "windows":
+		trustDropDir = filepath.Join(homeDir, "Documents", "TrustDrop")
 	case "linux":
-		targetDir, err = setupLinuxWorkingDirectory(execPath)
+		trustDropDir = filepath.Join(homeDir, ".trustdrop")
 	default:
-		// Fallback: use directory containing executable
-		targetDir = filepath.Dir(execPath)
+		trustDropDir = filepath.Join(homeDir, "TrustDrop")
 	}
 
-	if err != nil {
-		return err
+	// Create the directory if it doesn't exist
+	if err := os.MkdirAll(trustDropDir, 0755); err != nil {
+		return fmt.Errorf("failed to create TrustDrop directory: %w", err)
 	}
 
-	// Change to target directory
-	if err := os.Chdir(targetDir); err != nil {
-		return err
-	}
-
-	if os.Getenv("DEBUG") != "" {
-		fmt.Printf("Set working directory to: %s\n", targetDir)
-	}
-
-	return nil
-}
-
-// FIXED: Enhanced macOS working directory setup
-func setupMacOSWorkingDirectory(execPath string) (string, error) {
-	// Check if we're running from a .app bundle
-	if filepath.Base(filepath.Dir(execPath)) == "MacOS" {
-		// We're in .app/Contents/MacOS/
-		contentsDir := filepath.Dir(execPath)
-		appDir := filepath.Dir(contentsDir)
-		parentDir := filepath.Dir(appDir)
-		
-		// Strategy 1: Try to use the directory containing the .app bundle
-		if isWritableDirectory(parentDir) {
-			return parentDir, nil
-		}
-		
-		// Strategy 2: Try the .app bundle's Contents directory
-		if isWritableDirectory(contentsDir) {
-			return contentsDir, nil
-		}
-		
-		// Strategy 3: Use user's Documents directory for medical apps
-		homeDir, err := os.UserHomeDir()
-		if err == nil {
-			documentsDir := filepath.Join(homeDir, "Documents", "TrustDrop")
-			if err := os.MkdirAll(documentsDir, 0755); err == nil {
-				if isWritableDirectory(documentsDir) {
-					return documentsDir, nil
-				}
-			}
-		}
-		
-		// Strategy 4: Fallback to user's home directory
-		if err == nil {
-			trustDropDir := filepath.Join(homeDir, "TrustDrop")
-			if err := os.MkdirAll(trustDropDir, 0755); err == nil {
-				if isWritableDirectory(trustDropDir) {
-					return trustDropDir, nil
-				}
-			}
-		}
-		
-		// Strategy 5: Last resort - use temp directory
-		tempDir := filepath.Join(os.TempDir(), "TrustDrop")
-		if err := os.MkdirAll(tempDir, 0755); err == nil {
-			return tempDir, nil
-		}
-	}
-	
-	// If not in app bundle, use directory containing executable
-	return filepath.Dir(execPath), nil
-}
-
-// FIXED: Windows working directory setup
-func setupWindowsWorkingDirectory(execPath string) (string, error) {
-	execDir := filepath.Dir(execPath)
-	
-	// Strategy 1: Try directory containing .exe
-	if isWritableDirectory(execDir) {
-		return execDir, nil
-	}
-	
-	// Strategy 2: Use user's Documents directory
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		documentsDir := filepath.Join(homeDir, "Documents", "TrustDrop")
-		if err := os.MkdirAll(documentsDir, 0755); err == nil {
-			if isWritableDirectory(documentsDir) {
-				return documentsDir, nil
-			}
-		}
-	}
-	
-	// Strategy 3: Use AppData directory
-	if err == nil {
-		appDataDir := filepath.Join(homeDir, "AppData", "Local", "TrustDrop")
-		if err := os.MkdirAll(appDataDir, 0755); err == nil {
-			if isWritableDirectory(appDataDir) {
-				return appDataDir, nil
-			}
-		}
-	}
-	
-	// Fallback: use temp directory
-	tempDir := filepath.Join(os.TempDir(), "TrustDrop")
-	if err := os.MkdirAll(tempDir, 0755); err == nil {
-		return tempDir, nil
-	}
-	
-	return execDir, nil
-}
-
-// FIXED: Linux working directory setup
-func setupLinuxWorkingDirectory(execPath string) (string, error) {
-	execDir := filepath.Dir(execPath)
-	
-	// Strategy 1: Try directory containing executable
-	if isWritableDirectory(execDir) {
-		return execDir, nil
-	}
-	
-	// Strategy 2: Use user's home directory
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		trustDropDir := filepath.Join(homeDir, ".trustdrop")
-		if err := os.MkdirAll(trustDropDir, 0755); err == nil {
-			if isWritableDirectory(trustDropDir) {
-				return trustDropDir, nil
-			}
-		}
-	}
-	
-	// Strategy 3: Use /tmp
-	tempDir := filepath.Join("/tmp", "trustdrop")
-	if err := os.MkdirAll(tempDir, 0755); err == nil {
-		return tempDir, nil
-	}
-	
-	return execDir, nil
-}
-
-// FIXED: Helper to test if directory is writable
-func isWritableDirectory(dir string) bool {
-	testFile := filepath.Join(dir, ".trustdrop_write_test")
+	// Test write permissions
+	testFile := filepath.Join(trustDropDir, ".write_test")
 	f, err := os.Create(testFile)
 	if err != nil {
-		return false
+		return fmt.Errorf("TrustDrop directory is not writable: %w", err)
 	}
 	f.Close()
 	os.Remove(testFile)
-	return true
+
+	// Change to the TrustDrop directory
+	if err := os.Chdir(trustDropDir); err != nil {
+		return fmt.Errorf("failed to change to TrustDrop directory: %w", err)
+	}
+
+	if os.Getenv("DEBUG") != "" {
+		fmt.Printf("Set working directory to: %s\n", trustDropDir)
+	}
+
+	return nil
 }
 
 func getCurrentDir() string {
@@ -234,4 +125,20 @@ func getCurrentDir() string {
 		return "unknown"
 	}
 	return dir
+}
+
+func getDataDirectory() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "unknown"
+	}
+	return filepath.Join(wd, "data")
+}
+
+func directoryExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }

@@ -457,6 +457,7 @@ func (t *TrustDropApp) showProgressView() {
 	})
 }
 
+
 func (t *TrustDropApp) showSuccessView(message string) {
 	t.mutex.Lock()
 	t.currentView = "success"
@@ -469,12 +470,37 @@ func (t *TrustDropApp) showSuccessView(message string) {
 	fyne.Do(func() {
 		t.successMessage.SetText(message)
 
-		// Show additional UI elements for received files
+		// Show actual file location where files are saved
 		if strings.Contains(message, "received") {
-			receivedPath, _ := filepath.Abs(filepath.Join("data", "received"))
-			t.locationLabel.SetText(fmt.Sprintf("Files saved to: %s", receivedPath))
+			// Get the actual working directory and received path
+			workingDir, _ := os.Getwd()
+			actualReceivedPath := filepath.Join(workingDir, "data", "received")
+			
+			// Make it absolute and clean
+			if absPath, err := filepath.Abs(actualReceivedPath); err == nil {
+				actualReceivedPath = absPath
+			}
+			
+			t.locationLabel.SetText(fmt.Sprintf("Files saved to:\n%s", actualReceivedPath))
 			t.locationLabel.Show()
 			t.openFolderBtn.Show()
+			
+			// Update the open folder button to use the actual path
+			t.openFolderBtn.OnTapped = func() {
+				if _, err := os.Stat(actualReceivedPath); err == nil {
+					switch runtime.GOOS {
+					case "windows":
+						exec.Command("explorer", actualReceivedPath).Start()
+					case "darwin":
+						exec.Command("open", actualReceivedPath).Start()
+					case "linux":
+						exec.Command("xdg-open", actualReceivedPath).Start()
+					}
+				} else {
+					// If the directory doesn't exist, show an error
+					dialog.ShowError(fmt.Errorf("received files directory not found: %s", actualReceivedPath), t.window)
+				}
+			}
 		} else {
 			// Hide for sent files
 			t.locationLabel.Hide()
