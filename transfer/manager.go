@@ -344,10 +344,12 @@ func (tm *TransferManager) receiveFiles() {
 	}
 	defer os.RemoveAll(tempDir)
 
+	// Get current working directory (this should be the correct location now)
+	currentWorkingDir, _ := os.Getwd()
+
 	// Change to temp directory for receiving
-	originalDir, _ := os.Getwd()
 	os.Chdir(tempDir)
-	defer os.Chdir(originalDir)
+	defer os.Chdir(currentWorkingDir)
 
 	// FIXED: Use connection retry logic for better Europe-US connectivity
 	if err := tm.connectWithRetry(5); err != nil {
@@ -402,12 +404,12 @@ func (tm *TransferManager) receiveFiles() {
 	}
 
 	if !manifestFound {
-		tm.fallbackDecryption(files, originalDir)
+		tm.fallbackDecryption(files, currentWorkingDir)
 		return
 	}
 
-	// Create base directory if folder was sent
-	baseDir := filepath.Join(originalDir, "data", "received")
+	// Create base directory if folder was sent - use current working directory
+	baseDir := filepath.Join(currentWorkingDir, "data", "received")
 	if manifest.FolderName != "" {
 		baseDir = filepath.Join(baseDir, manifest.FolderName)
 	}
@@ -443,8 +445,8 @@ func (tm *TransferManager) receiveFiles() {
 		// Find original path from manifest
 		fileInfo, exists := manifest.Files[file]
 		if !exists {
-			// Fallback to hash name
-			finalPath := filepath.Join(originalDir, "data", "received", file)
+			// Fallback to hash name - use current working directory
+			finalPath := filepath.Join(currentWorkingDir, "data", "received", file)
 			os.MkdirAll(filepath.Dir(finalPath), 0755)
 			if err := os.WriteFile(finalPath, decData, 0644); err == nil {
 				successCount++
@@ -491,10 +493,10 @@ func (tm *TransferManager) receiveFiles() {
 	}
 }
 
-func (tm *TransferManager) fallbackDecryption(files []string, originalDir string) {
+func (tm *TransferManager) fallbackDecryption(files []string, currentWorkingDir string) {
 	// Fallback mode when no manifest is available
 	successCount := 0
-	baseDir := filepath.Join(originalDir, "data", "received")
+	baseDir := filepath.Join(currentWorkingDir, "data", "received")
 
 	// FIXED: Create base directory
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
