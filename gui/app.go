@@ -62,6 +62,10 @@ type TrustDropApp struct {
 	mutex           sync.Mutex
 	isTransferring  bool
 	selectionDialog *dialog.CustomDialog
+	
+	// FIXED: Add error tracking
+	lastError       error
+	transferSuccess bool
 }
 
 func NewTrustDropApp() (*TrustDropApp, error) {
@@ -83,6 +87,7 @@ func NewTrustDropApp() (*TrustDropApp, error) {
 		transferManager: transferManager,
 		currentView:     "main",
 		isTransferring:  false,
+		transferSuccess: false,
 	}
 
 	// Set up callbacks with proper thread safety
@@ -110,7 +115,7 @@ func (t *TrustDropApp) setupUI() {
 }
 
 func (t *TrustDropApp) createMainView() {
-	// App logo/title - FIXED: Remove marketing text
+	// App logo/title
 	title := widget.NewLabelWithStyle("TrustDrop",
 		fyne.TextAlignCenter,
 		fyne.TextStyle{Bold: true})
@@ -128,7 +133,7 @@ func (t *TrustDropApp) createMainView() {
 	})
 	receiveBtn.Importance = widget.MediumImportance
 
-	// Layout - FIXED: Simplified without marketing text
+	// Layout
 	content := container.NewVBox(
 		container.NewPadded(container.NewVBox(
 			title,
@@ -162,7 +167,7 @@ func (t *TrustDropApp) createSendView() {
 		})
 	})
 
-	// FIXED: Select files button with proper state management
+	// Select files button with proper state management
 	t.selectButton = widget.NewButton("Choose Files to Send", t.onSelectFiles)
 	t.selectButton.Importance = widget.HighImportance
 	t.selectButton.Icon = theme.FolderOpenIcon()
@@ -180,17 +185,17 @@ func (t *TrustDropApp) createSendView() {
 				func(cancel bool) {
 					if cancel {
 						t.transferManager.CancelTransfer()
-						t.resetSendView() // FIXED: Reset UI state
+						t.resetSendView()
 						t.showMainView()
 					}
 				}, t.window)
 		} else {
-			t.resetSendView() // FIXED: Reset UI state
+			t.resetSendView()
 			t.showMainView()
 		}
 	})
 
-	// Layout - FIXED: Better instructions
+	// Layout - Better instructions
 	codeCard := widget.NewCard("", "Your Transfer Code:",
 		container.NewVBox(
 			container.NewPadded(t.peerIDDisplay),
@@ -270,7 +275,7 @@ func (t *TrustDropApp) createProgressView() {
 			func(cancel bool) {
 				if cancel {
 					t.transferManager.CancelTransfer()
-					t.resetTransferState() // FIXED: Reset state
+					t.resetTransferState()
 					t.showMainView()
 				}
 			}, t.window)
@@ -322,8 +327,8 @@ func (t *TrustDropApp) createSuccessView() {
 
 	// Open folder button for received files
 	t.openFolderBtn = widget.NewButtonWithIcon("Open Folder", theme.FolderOpenIcon(), func() {
-		// Open the received files folder
-		receivedPath := filepath.Join("data", "received")
+		// FIXED: Use absolute path to received files
+		receivedPath, _ := filepath.Abs(filepath.Join("data", "received"))
 		if _, err := os.Stat(receivedPath); err == nil {
 			// Try to open the folder in the system file manager
 			switch runtime.GOOS {
@@ -358,12 +363,14 @@ func (t *TrustDropApp) createSuccessView() {
 	t.successCard = widget.NewCard("Success", "", content)
 }
 
-// FIXED: Add state reset methods
+// Add state reset methods
 func (t *TrustDropApp) resetSendView() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
 	t.isTransferring = false
+	t.transferSuccess = false
+	t.lastError = nil
 	t.selectButton.Enable()
 	t.waitingLabel.Hide()
 	t.waitingLabel.SetText("Share the code above with the receiver")
@@ -374,6 +381,8 @@ func (t *TrustDropApp) resetTransferState() {
 	defer t.mutex.Unlock()
 
 	t.isTransferring = false
+	t.transferSuccess = false
+	t.lastError = nil
 	t.selectButton.Enable()
 	t.waitingLabel.Hide()
 	t.statusLabel.SetText("Transfer in progress, please wait...")
@@ -424,13 +433,15 @@ func (t *TrustDropApp) showSuccessView(message string) {
 	t.mutex.Lock()
 	t.currentView = "success"
 	t.isTransferring = false
+	t.transferSuccess = true
 	t.mutex.Unlock()
 
 	t.successMessage.SetText(message)
 
 	// Show additional UI elements for received files
 	if strings.Contains(message, "received") {
-		t.locationLabel.SetText("Files saved to: data/received/")
+		receivedPath, _ := filepath.Abs(filepath.Join("data", "received"))
+		t.locationLabel.SetText(fmt.Sprintf("Files saved to: %s", receivedPath))
 		t.locationLabel.Show()
 		t.openFolderBtn.Show()
 	} else {
@@ -482,22 +493,32 @@ func (t *TrustDropApp) selectSingleFile() {
 		reader.Close()
 
 		path := reader.URI().Path()
-		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") {
-			path = path[1:]
+		
+		// FIXED: Better cross-platform path handling
+		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") && len(path) > 1 && path[2] == ':' {
+			path = path[1:] // Remove leading slash on Windows for absolute paths
+		}
+		
+		// FIXED: Verify file exists and is accessible
+		if _, err := os.Stat(path); err != nil {
+			dialog.ShowError(fmt.Errorf("cannot access selected file: %v", err), t.window)
+			return
 		}
 
 		t.startSend([]string{path})
 	}, t.window)
 
-	// CRITICAL FIX: Remove the filter entirely to show ALL files
-	// The empty array filter was blocking all files from showing
-	// By not setting any filter, Fyne will show all files by default
+	// CRITICAL FIX: DO NOT set any filters - let all files show
+	// The previous empty filter was blocking ALL files from appearing
+	// By not setting any filter, Fyne shows all files by default
 
-	// Set initial location to user's home directory
-	homeDir, _ := os.UserHomeDir()
-	listableURI := storage.NewFileURI(homeDir)
-	if lister, ok := listableURI.(fyne.ListableURI); ok {
-		fileDialog.SetLocation(lister)
+	// Set initial location to user's home directory for better UX
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		if listableURI := storage.NewFileURI(homeDir); listableURI != nil {
+			if lister, ok := listableURI.(fyne.ListableURI); ok {
+				fileDialog.SetLocation(lister)
+			}
+		}
 	}
 
 	fileDialog.Show()
@@ -513,13 +534,15 @@ func (t *TrustDropApp) selectFolder() {
 		}
 
 		path := uri.Path()
-		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") {
+		
+		// FIXED: Better cross-platform path handling
+		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") && len(path) > 1 && path[2] == ':' {
 			path = path[1:]
 		}
 
 		// Verify access
 		if _, err := os.Stat(path); err != nil {
-			dialog.ShowError(fmt.Errorf("cannot access this folder"), t.window)
+			dialog.ShowError(fmt.Errorf("cannot access this folder: %v", err), t.window)
 			return
 		}
 
@@ -532,45 +555,62 @@ func (t *TrustDropApp) startSend(paths []string) {
 		return
 	}
 
+	// FIXED: Reset error state before starting
 	t.mutex.Lock()
 	t.isTransferring = true
+	t.transferSuccess = false
+	t.lastError = nil
 	t.mutex.Unlock()
 
-	// Update UI to show waiting state - FIXED: Don't disable permanently
+	// Update UI to show waiting state
 	t.waitingLabel.Show()
 	t.waitingLabel.SetText("Waiting for receiver to connect...")
 
 	// Start transfer in background
 	go func() {
 		err := t.transferManager.SendFiles(paths)
+		
+		t.mutex.Lock()
+		t.lastError = err
+		t.mutex.Unlock()
+		
 		if err != nil {
-			// FIXED: Re-enable button on error
+			// Re-enable button on error
 			t.mutex.Lock()
 			t.isTransferring = false
+			t.transferSuccess = false
 			t.mutex.Unlock()
 
 			t.waitingLabel.Hide()
 
-			fyne.CurrentApp().SendNotification(&fyne.Notification{
-				Title:   "Transfer Failed",
-				Content: err.Error(),
-			})
+			// FIXED: Show detailed error to user
+			dialog.ShowError(fmt.Errorf("transfer failed: %v", err), t.window)
 			t.window.Canvas().Content().Refresh()
 		}
 	}()
 }
 
 func (t *TrustDropApp) onStartReceive(code string) {
+	// FIXED: Reset error state before starting
+	t.mutex.Lock()
+	t.transferSuccess = false
+	t.lastError = nil
+	t.mutex.Unlock()
+	
 	t.showProgressView()
 	t.statusLabel.SetText("Connecting to sender...")
 
 	go func() {
 		err := t.transferManager.StartReceive(code)
+		
+		t.mutex.Lock()
+		t.lastError = err
+		t.mutex.Unlock()
+		
 		if err != nil {
-			fyne.CurrentApp().SendNotification(&fyne.Notification{
-				Title:   "Transfer Failed",
-				Content: err.Error(),
-			})
+			// FIXED: Show detailed error to user
+			dialog.ShowError(fmt.Errorf("receive failed: %v", err), t.window)
+			
 			// Return to receive view on error
 			time.Sleep(time.Second) // Brief delay so user sees the error
 			t.resetTransferState()
@@ -579,11 +619,35 @@ func (t *TrustDropApp) onStartReceive(code string) {
 	}()
 }
 
-// FIXED: Enhanced status update with proper progress tracking
+// FIXED: Enhanced status update with proper error checking
 func (t *TrustDropApp) onStatusUpdate(status string) {
 	t.mutex.Lock()
 	currentView := t.currentView
 	t.mutex.Unlock()
+
+	// Check for error conditions first
+	if strings.Contains(status, "failed") || strings.Contains(status, "error") {
+		t.mutex.Lock()
+		t.transferSuccess = false
+		t.mutex.Unlock()
+		
+		// Show error immediately
+		fyne.CurrentApp().SendNotification(&fyne.Notification{
+			Title:   "Transfer Failed",
+			Content: status,
+		})
+		
+		// Return to appropriate view
+		if currentView == "progress" {
+			t.resetTransferState()
+			if strings.Contains(currentView, "send") {
+				t.showSendView()
+			} else {
+				t.showReceiveView()
+			}
+		}
+		return
+	}
 
 	// Simplify status messages for users
 	userStatus := t.simplifyStatus(status)
@@ -603,25 +667,31 @@ func (t *TrustDropApp) onStatusUpdate(status string) {
 		t.statusLabel.SetText(userStatus)
 	}
 
-	// Handle completion
-	if strings.Contains(status, "successfully") {
-		var message string
-		if strings.Contains(status, "decrypted") {
-			message = "Files received successfully!"
-		} else {
-			message = "Files sent successfully!"
+	// Handle successful completion - ONLY show success if transfer actually worked
+	if strings.Contains(status, "successfully") && !strings.Contains(status, "failed") {
+		t.mutex.Lock()
+		hasError := t.lastError != nil
+		t.mutex.Unlock()
+		
+		if !hasError {
+			var message string
+			if strings.Contains(status, "received") || strings.Contains(status, "decrypted") {
+				message = "Files received successfully!"
+			} else {
+				message = "Files sent successfully!"
+			}
+			t.showSuccessView(message)
 		}
-		t.showSuccessView(message)
 	}
 
-	// Handle cancellation - FIXED: Properly reset state
+	// Handle cancellation
 	if strings.Contains(status, "cancelled") {
 		t.resetTransferState()
 		t.showMainView()
 	}
 }
 
-// FIXED: Simplified progress updates - no progress bar, just status messages
+// Progress updates remain the same but with better error checking
 func (t *TrustDropApp) onProgressUpdate(progress transfer.TransferProgress) {
 	t.mutex.Lock()
 	currentView := t.currentView
@@ -639,7 +709,7 @@ func (t *TrustDropApp) onProgressUpdate(progress transfer.TransferProgress) {
 			}
 		}
 
-		// Update status for different stages with better feedback
+		// Update status for different stages
 		if progress.PercentComplete < 5 {
 			t.statusLabel.SetText("Initializing transfer...")
 		} else if progress.PercentComplete < 15 {

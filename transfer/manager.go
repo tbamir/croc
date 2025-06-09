@@ -39,11 +39,16 @@ type TransferManager struct {
 	encryptionKey []byte
 	fileHashes    map[string]string
 
-	// FIXED: Enhanced progress tracking
+	// Enhanced progress tracking
 	lastProgressUpdate time.Time
 	progressThrottle   time.Duration
 	bytesTransferred   int64
 	overallProgress    float64
+	
+	// FIXED: Add error tracking and validation
+	lastError          error
+	transferCompleted  bool
+	receivedFilesCount int
 }
 
 type TransferProgress struct {
@@ -71,7 +76,7 @@ type FileInfo struct {
 }
 
 func NewTransferManager() (*TransferManager, error) {
-	// FIXED: Generate stronger local peer ID using secure random
+	// Generate stronger local peer ID using secure random
 	localPeerID := generateSecureCode()
 
 	// Only show debug output when DEBUG environment variable is set
@@ -86,13 +91,15 @@ func NewTransferManager() (*TransferManager, error) {
 	}
 
 	return &TransferManager{
-		localPeerID:      localPeerID,
-		isReceiving:      false,
-		isSending:        false,
-		logger:           logger,
-		fileHashes:       make(map[string]string),
-		progressThrottle: 100 * time.Millisecond,
-		overallProgress:  0.0,
+		localPeerID:        localPeerID,
+		isReceiving:        false,
+		isSending:          false,
+		logger:             logger,
+		fileHashes:         make(map[string]string),
+		progressThrottle:   100 * time.Millisecond,
+		overallProgress:    0.0,
+		transferCompleted:  false,
+		receivedFilesCount: 0,
 	}, nil
 }
 
@@ -120,7 +127,7 @@ func (tm *TransferManager) updateStatus(status string) {
 	}
 }
 
-// FIXED: Enhanced progress tracking with real-time updates
+// Enhanced progress tracking with real-time updates
 func (tm *TransferManager) updateProgress(current int64, total int64, currentFile string) {
 	now := time.Now()
 	if now.Sub(tm.lastProgressUpdate) < tm.progressThrottle {
@@ -153,7 +160,7 @@ func (tm *TransferManager) updateProgress(current int64, total int64, currentFil
 	}
 }
 
-// FIXED: New method for incremental progress updates during transfer
+// New method for incremental progress updates during transfer
 func (tm *TransferManager) updateIncrementalProgress(bytesAdded int64, currentFile string) {
 	tm.mutex.Lock()
 	defer tm.mutex.Unlock()
@@ -190,17 +197,19 @@ func (tm *TransferManager) updateIncrementalProgress(bytesAdded int64, currentFi
 }
 
 func (tm *TransferManager) StartReceive(peerSecret string) error {
-	// FIXED: Add panic recovery
+	// Add panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			tm.updateStatus(fmt.Sprintf("Receive failed: %v", r))
+			errorMsg := fmt.Sprintf("Receive failed: %v", r)
+			tm.updateStatus(errorMsg)
+			tm.lastError = fmt.Errorf("panic: %v", r)
 			if tm.logger != nil {
 				tm.logger.LogTransfer(logging.TransferLog{
 					Timestamp: time.Now(),
 					PeerID:    peerSecret,
 					FileName:  tm.currentFile,
 					Status:    "failed",
-					Error:     fmt.Sprintf("panic: %v", r),
+					Error:     errorMsg,
 					Direction: "receive",
 				})
 			}
@@ -214,12 +223,16 @@ func (tm *TransferManager) StartReceive(peerSecret string) error {
 		return fmt.Errorf("transfer already in progress")
 	}
 
+	// FIXED: Reset transfer state
 	tm.currentSecret = peerSecret
 	tm.isReceiving = true
 	tm.transferStart = time.Now()
 	tm.filesComplete = 0
 	tm.bytesTransferred = 0
 	tm.overallProgress = 0.0
+	tm.transferCompleted = false
+	tm.receivedFilesCount = 0
+	tm.lastError = nil
 
 	// Derive encryption key from the shared secret
 	tm.deriveEncryptionKey(peerSecret)
@@ -233,17 +246,19 @@ func (tm *TransferManager) StartReceive(peerSecret string) error {
 }
 
 func (tm *TransferManager) SendFiles(paths []string) error {
-	// FIXED: Add panic recovery
+	// Add panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			tm.updateStatus(fmt.Sprintf("Transfer failed: %v", r))
+			errorMsg := fmt.Sprintf("Transfer failed: %v", r)
+			tm.updateStatus(errorMsg)
+			tm.lastError = fmt.Errorf("panic: %v", r)
 			if tm.logger != nil {
 				tm.logger.LogTransfer(logging.TransferLog{
 					Timestamp: time.Now(),
 					PeerID:    tm.localPeerID,
 					FileName:  tm.currentFile,
 					Status:    "failed",
-					Error:     fmt.Sprintf("panic: %v", r),
+					Error:     errorMsg,
 					Direction: "send",
 				})
 			}
@@ -257,11 +272,14 @@ func (tm *TransferManager) SendFiles(paths []string) error {
 		return fmt.Errorf("transfer already in progress")
 	}
 
+	// FIXED: Reset transfer state
 	tm.isSending = true
 	tm.transferStart = time.Now()
 	tm.filesComplete = 0
 	tm.bytesTransferred = 0
 	tm.overallProgress = 0.0
+	tm.transferCompleted = false
+	tm.lastError = nil
 
 	// Derive encryption key from our local peer ID
 	tm.deriveEncryptionKey(tm.localPeerID)
@@ -276,7 +294,7 @@ func (tm *TransferManager) SendFiles(paths []string) error {
 
 // deriveEncryptionKey derives an AES key from the shared secret with improved security
 func (tm *TransferManager) deriveEncryptionKey(secret string) {
-	// FIXED: Multiple rounds of hashing for better security
+	// Multiple rounds of hashing for better security
 	hash := sha256.Sum256([]byte(secret + "-trustdrop-aes-v1"))
 	for i := 0; i < 10000; i++ {
 		hash = sha256.Sum256(append(hash[:], []byte(secret)...))
@@ -305,16 +323,21 @@ func (tm *TransferManager) receiveFiles() {
 			if os.Getenv("DEBUG") != "" {
 				fmt.Printf("TransferManager: Recovered from panic in receiveFiles: %v\n", r)
 			}
+			tm.lastError = fmt.Errorf("panic in receiveFiles: %v", r)
 		}
 
 		tm.mutex.Lock()
 		duration := time.Since(tm.transferStart).String()
-		status := "success"
-		errorMsg := ""
-
-		if tm.currentFile == "" {
-			status = "failed"
-			errorMsg = "No files received"
+		
+		// FIXED: Better success/failure determination
+		status := "failed"
+		errorMsg := "No files received"
+		
+		if tm.lastError == nil && tm.receivedFilesCount > 0 && tm.transferCompleted {
+			status = "success"
+			errorMsg = ""
+		} else if tm.lastError != nil {
+			errorMsg = tm.lastError.Error()
 		}
 
 		fileHash := ""
@@ -336,21 +359,35 @@ func (tm *TransferManager) receiveFiles() {
 		tm.mutex.Unlock()
 	}()
 
+	// FIXED: Ensure absolute paths for temp and output directories
+	workingDir, err := os.Getwd()
+	if err != nil {
+		tm.lastError = fmt.Errorf("failed to get working directory: %v", err)
+		tm.updateStatus("Failed to get working directory")
+		return
+	}
+
 	// Create temporary directory for encrypted files
-	tempDir := filepath.Join("data", "temp", fmt.Sprintf("receive-%d", time.Now().Unix()))
+	tempDir := filepath.Join(workingDir, "data", "temp", fmt.Sprintf("receive-%d", time.Now().Unix()))
 	if err := os.MkdirAll(tempDir, 0700); err != nil {
+		tm.lastError = fmt.Errorf("failed to create temp directory: %v", err)
 		tm.updateStatus(fmt.Sprintf("Failed to create temp directory: %v", err))
 		return
 	}
 	defer os.RemoveAll(tempDir)
 
 	// Change to temp directory for receiving
-	originalDir, _ := os.Getwd()
-	os.Chdir(tempDir)
+	originalDir := workingDir
+	if err := os.Chdir(tempDir); err != nil {
+		tm.lastError = fmt.Errorf("failed to change to temp directory: %v", err)
+		tm.updateStatus("Failed to setup temp directory")
+		return
+	}
 	defer os.Chdir(originalDir)
 
-	// FIXED: Use connection retry logic for better Europe-US connectivity
+	// Use connection retry logic for better connectivity
 	if err := tm.connectWithRetry(5); err != nil {
+		tm.lastError = err
 		tm.updateStatus(fmt.Sprintf("Failed to connect: %v", err))
 		return
 	}
@@ -358,15 +395,17 @@ func (tm *TransferManager) receiveFiles() {
 	tm.updateStatus("Connected! Receiving files...")
 
 	// Start receiving - this blocks until complete or error
-	err := tm.crocClient.Receive()
+	err = tm.crocClient.Receive()
 	if err != nil {
+		tm.lastError = err
 		tm.updateStatus(fmt.Sprintf("Receive failed: %v", err))
 		return
 	}
 
-	// Process received files
+	// FIXED: Verify files were actually received
 	files, err := filepath.Glob("*")
 	if err != nil || len(files) == 0 {
+		tm.lastError = fmt.Errorf("no files received from sender")
 		tm.updateStatus("No files received")
 		return
 	}
@@ -386,11 +425,13 @@ func (tm *TransferManager) receiveFiles() {
 
 			decData, err := security.DecryptAES256CBC(encData, tm.encryptionKey)
 			if err != nil {
+				tm.lastError = fmt.Errorf("failed to decrypt manifest: %v", err)
 				continue
 			}
 
 			manifest = &FileManifest{}
 			if err := json.Unmarshal(decData, manifest); err != nil {
+				tm.lastError = fmt.Errorf("failed to parse manifest: %v", err)
 				continue
 			}
 
@@ -402,11 +443,12 @@ func (tm *TransferManager) receiveFiles() {
 	}
 
 	if !manifestFound {
+		tm.lastError = fmt.Errorf("manifest file not found or corrupted")
 		tm.fallbackDecryption(files, originalDir)
 		return
 	}
 
-	// Create base directory if folder was sent
+	// FIXED: Create base directory with absolute path
 	baseDir := filepath.Join(originalDir, "data", "received")
 	if manifest.FolderName != "" {
 		baseDir = filepath.Join(baseDir, manifest.FolderName)
@@ -414,6 +456,7 @@ func (tm *TransferManager) receiveFiles() {
 
 	// Always create the base directory
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		tm.lastError = fmt.Errorf("failed to create output directory: %v", err)
 		tm.updateStatus(fmt.Sprintf("Failed to create folder: %v", err))
 		return
 	}
@@ -431,12 +474,18 @@ func (tm *TransferManager) receiveFiles() {
 		// Read encrypted file
 		encData, err := os.ReadFile(file)
 		if err != nil {
+			if os.Getenv("DEBUG") != "" {
+				fmt.Printf("Failed to read encrypted file %s: %v\n", file, err)
+			}
 			continue
 		}
 
 		// Decrypt the file
 		decData, err := security.DecryptAES256CBC(encData, tm.encryptionKey)
 		if err != nil {
+			if os.Getenv("DEBUG") != "" {
+				fmt.Printf("Failed to decrypt file %s: %v\n", file, err)
+			}
 			continue
 		}
 
@@ -444,10 +493,11 @@ func (tm *TransferManager) receiveFiles() {
 		fileInfo, exists := manifest.Files[file]
 		if !exists {
 			// Fallback to hash name
-			finalPath := filepath.Join(originalDir, "data", "received", file)
-			os.MkdirAll(filepath.Dir(finalPath), 0755)
-			if err := os.WriteFile(finalPath, decData, 0644); err == nil {
-				successCount++
+			finalPath := filepath.Join(baseDir, file)
+			if err := os.MkdirAll(filepath.Dir(finalPath), 0755); err == nil {
+				if err := os.WriteFile(finalPath, decData, 0644); err == nil {
+					successCount++
+				}
 			}
 			continue
 		}
@@ -457,15 +507,21 @@ func (tm *TransferManager) receiveFiles() {
 
 		// Create directory structure
 		if err := os.MkdirAll(filepath.Dir(finalPath), 0755); err != nil {
+			if os.Getenv("DEBUG") != "" {
+				fmt.Printf("Failed to create directory for %s: %v\n", finalPath, err)
+			}
 			continue
 		}
 
 		// Write decrypted file with original name
 		if err := os.WriteFile(finalPath, decData, 0644); err != nil {
+			if os.Getenv("DEBUG") != "" {
+				fmt.Printf("Failed to write file %s: %v\n", finalPath, err)
+			}
 			continue
 		}
 
-		// Calculate hash of decrypted file
+		// Calculate hash of decrypted file for verification
 		hash, err := tm.calculateFileHash(finalPath)
 		if err == nil {
 			tm.fileHashes[fileInfo.RelativePath] = hash
@@ -480,13 +536,17 @@ func (tm *TransferManager) receiveFiles() {
 		successCount++
 	}
 
+	// FIXED: Set completion status based on actual success
+	tm.receivedFilesCount = successCount
 	if successCount > 0 {
+		tm.transferCompleted = true
 		if manifest.FolderName != "" {
 			tm.updateStatus(fmt.Sprintf("Transfer complete! Folder '%s' with %d files restored successfully", manifest.FolderName, successCount))
 		} else {
 			tm.updateStatus(fmt.Sprintf("Transfer complete! %d files restored successfully", successCount))
 		}
 	} else {
+		tm.lastError = fmt.Errorf("no files could be decrypted successfully")
 		tm.updateStatus("Transfer failed - no files could be decrypted")
 	}
 }
@@ -496,14 +556,15 @@ func (tm *TransferManager) fallbackDecryption(files []string, originalDir string
 	successCount := 0
 	baseDir := filepath.Join(originalDir, "data", "received")
 
-	// FIXED: Create base directory
+	// Create base directory
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		tm.lastError = fmt.Errorf("failed to create received directory: %v", err)
 		tm.updateStatus(fmt.Sprintf("Failed to create received directory: %v", err))
 		return
 	}
 
 	for i, encFile := range files {
-		// FIXED: Update progress during fallback decryption
+		// Update progress during fallback decryption
 		progress := float64(i+1) / float64(len(files)) * 100
 		tm.updateProgress(int64(progress), 100, encFile)
 
@@ -517,7 +578,7 @@ func (tm *TransferManager) fallbackDecryption(files []string, originalDir string
 			continue
 		}
 
-		// FIXED: Use strings.TrimSuffix unconditionally
+		// Use strings.TrimSuffix unconditionally
 		fileName := strings.TrimSuffix(encFile, ".enc")
 
 		finalPath := filepath.Join(baseDir, fileName)
@@ -539,9 +600,12 @@ func (tm *TransferManager) fallbackDecryption(files []string, originalDir string
 		successCount++
 	}
 
+	tm.receivedFilesCount = successCount
 	if successCount > 0 {
+		tm.transferCompleted = true
 		tm.updateStatus(fmt.Sprintf("Files received (%d files) - original names not preserved", successCount))
 	} else {
+		tm.lastError = fmt.Errorf("failed to decrypt any received files")
 		tm.updateStatus("Failed to decrypt received files")
 	}
 }
@@ -552,6 +616,7 @@ func (tm *TransferManager) sendFiles(paths []string) {
 			if os.Getenv("DEBUG") != "" {
 				fmt.Printf("TransferManager: Recovered from panic in sendFiles: %v\n", r)
 			}
+			tm.lastError = fmt.Errorf("panic in sendFiles: %v", r)
 		}
 
 		tm.mutex.Lock()
@@ -560,9 +625,13 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		status := "success"
 		errorMsg := ""
 
-		if tm.crocClient == nil || !tm.crocClient.SuccessfulTransfer {
+		if tm.lastError != nil || tm.crocClient == nil || !tm.crocClient.SuccessfulTransfer {
 			status = "failed"
-			errorMsg = "Transfer failed"
+			if tm.lastError != nil {
+				errorMsg = tm.lastError.Error()
+			} else {
+				errorMsg = "Transfer failed"
+			}
 		}
 
 		fileHash := ""
@@ -583,9 +652,18 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		tm.mutex.Unlock()
 	}()
 
+	// FIXED: Ensure absolute paths
+	workingDir, err := os.Getwd()
+	if err != nil {
+		tm.lastError = fmt.Errorf("failed to get working directory: %v", err)
+		tm.updateStatus("Failed to get working directory")
+		return
+	}
+
 	// Create temporary directory for encrypted files
-	tempDir := filepath.Join("data", "temp", fmt.Sprintf("send-%d", time.Now().Unix()))
+	tempDir := filepath.Join(workingDir, "data", "temp", fmt.Sprintf("send-%d", time.Now().Unix()))
 	if err := os.MkdirAll(tempDir, 0700); err != nil {
+		tm.lastError = fmt.Errorf("failed to create temp directory: %v", err)
 		tm.updateStatus(fmt.Sprintf("Failed to create temp directory: %v", err))
 		return
 	}
@@ -615,13 +693,23 @@ func (tm *TransferManager) sendFiles(paths []string) {
 
 	// Collect all files to transfer
 	for _, path := range paths {
-		fileInfo, err := os.Stat(path)
+		// FIXED: Ensure absolute path resolution
+		absPath, err := filepath.Abs(path)
 		if err != nil {
-			continue
+			tm.lastError = fmt.Errorf("failed to resolve path %s: %v", path, err)
+			tm.updateStatus(fmt.Sprintf("Failed to resolve path: %v", err))
+			return
+		}
+
+		fileInfo, err := os.Stat(absPath)
+		if err != nil {
+			tm.lastError = fmt.Errorf("cannot access file %s: %v", absPath, err)
+			tm.updateStatus(fmt.Sprintf("Cannot access file: %v", err))
+			return
 		}
 
 		if fileInfo.IsDir() {
-			err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+			err = filepath.Walk(absPath, func(filePath string, info os.FileInfo, err error) error {
 				if err != nil {
 					return err
 				}
@@ -632,15 +720,18 @@ func (tm *TransferManager) sendFiles(paths []string) {
 				return nil
 			})
 			if err != nil {
-				continue
+				tm.lastError = fmt.Errorf("failed to walk directory %s: %v", absPath, err)
+				tm.updateStatus(fmt.Sprintf("Failed to process directory: %v", err))
+				return
 			}
 		} else {
-			filesToEncrypt = append(filesToEncrypt, path)
+			filesToEncrypt = append(filesToEncrypt, absPath)
 			tm.totalSize += fileInfo.Size()
 		}
 	}
 
 	if len(filesToEncrypt) == 0 {
+		tm.lastError = fmt.Errorf("no files found to send")
 		tm.updateStatus("No files found to send")
 		return
 	}
@@ -648,7 +739,7 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	tm.totalFiles = len(filesToEncrypt)
 	tm.updateStatus(fmt.Sprintf("Encrypting %d files...", len(filesToEncrypt)))
 
-	// FIXED: Use chunked encryption for large files
+	// Use chunked encryption for large files
 	var encryptedPaths []string
 
 	for i, filePath := range filesToEncrypt {
@@ -658,6 +749,9 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		// Calculate hash of original file
 		hash, err := tm.calculateFileHash(filePath)
 		if err != nil {
+			if os.Getenv("DEBUG") != "" {
+				fmt.Printf("Failed to hash file %s: %v\n", filePath, err)
+			}
 			continue
 		}
 
@@ -666,7 +760,7 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		hasher.Write([]byte(filePath + hash))
 		anonymizedName := hex.EncodeToString(hasher.Sum(nil))[:32]
 
-		// FIXED: Use chunked encryption instead of loading entire file
+		// Use chunked encryption instead of loading entire file
 		encFile := filepath.Join(tempDir, anonymizedName)
 		if err := tm.encryptFileChunked(filePath, encFile); err != nil {
 			if os.Getenv("DEBUG") != "" {
@@ -716,6 +810,7 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	}
 
 	if len(encryptedPaths) == 0 {
+		tm.lastError = fmt.Errorf("failed to encrypt any files")
 		tm.updateStatus("Failed to encrypt files")
 		return
 	}
@@ -727,18 +822,21 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	// Create and encrypt manifest
 	manifestData, err := json.Marshal(manifest)
 	if err != nil {
+		tm.lastError = fmt.Errorf("failed to create manifest: %v", err)
 		tm.updateStatus("Failed to create file manifest")
 		return
 	}
 
 	encryptedManifest, err := security.EncryptAES256CBC(manifestData, tm.encryptionKey)
 	if err != nil {
+		tm.lastError = fmt.Errorf("failed to encrypt manifest: %v", err)
 		tm.updateStatus("Failed to encrypt file manifest")
 		return
 	}
 
 	manifestPath := filepath.Join(tempDir, "manifest.enc")
 	if err := os.WriteFile(manifestPath, encryptedManifest, 0600); err != nil {
+		tm.lastError = fmt.Errorf("failed to save manifest: %v", err)
 		tm.updateStatus("Failed to save file manifest")
 		return
 	}
@@ -748,14 +846,16 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	// Get file info for encrypted files
 	filesInfo, emptyFolders, totalFolders, err := croc.GetFilesInfo(encryptedPaths, false, false, []string{})
 	if err != nil {
+		tm.lastError = fmt.Errorf("failed to prepare files: %v", err)
 		tm.updateStatus(fmt.Sprintf("Failed to prepare files: %v", err))
 		return
 	}
 
 	tm.updateStatus("Connecting to receiver...")
 
-	// FIXED: Use connection retry logic for better Europe-US connectivity
+	// Use connection retry logic for better connectivity
 	if err := tm.connectWithRetry(5); err != nil {
+		tm.lastError = err
 		tm.updateStatus(fmt.Sprintf("Failed to connect: %v", err))
 		return
 	}
@@ -770,11 +870,19 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	// Start sending
 	err = tm.crocClient.Send(filesInfo, emptyFolders, totalFolders)
 	if err != nil {
+		tm.lastError = err
 		tm.updateStatus(fmt.Sprintf("Transfer failed: %v", err))
 		return
 	}
 
-	tm.updateStatus("Transfer completed successfully!")
+	// FIXED: Only report success if croc confirms successful transfer
+	if tm.crocClient.SuccessfulTransfer {
+		tm.transferCompleted = true
+		tm.updateStatus("Transfer completed successfully!")
+	} else {
+		tm.lastError = fmt.Errorf("transfer did not complete successfully")
+		tm.updateStatus("Transfer failed to complete")
+	}
 }
 
 func (tm *TransferManager) logTransfer(peerID, fileName, fileHash string, fileSize int64, direction, status, errorMsg, duration string) {
@@ -830,6 +938,8 @@ func (tm *TransferManager) CancelTransfer() {
 	tm.crocClient = nil
 	tm.bytesTransferred = 0
 	tm.overallProgress = 0.0
+	tm.transferCompleted = false
+	tm.lastError = nil
 
 	if tm.statusCb != nil {
 		tm.statusCb("Transfer cancelled")
@@ -840,17 +950,17 @@ func (tm *TransferManager) GetLogger() *logging.Logger {
 	return tm.logger
 }
 
-// FIXED: Add chunked file encryption to prevent memory crashes with large files
+// Add chunked file encryption to prevent memory crashes with large files
 func (tm *TransferManager) encryptFileChunked(filePath, encPath string) error {
 	inFile, err := os.Open(filePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open input file: %v", err)
 	}
 	defer inFile.Close()
 
 	outFile, err := os.Create(encPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create output file: %v", err)
 	}
 	defer outFile.Close()
 
@@ -861,23 +971,23 @@ func (tm *TransferManager) encryptFileChunked(filePath, encPath string) error {
 		if n > 0 {
 			encrypted, encErr := security.EncryptAES256CBC(buffer[:n], tm.encryptionKey)
 			if encErr != nil {
-				return encErr
+				return fmt.Errorf("encryption failed: %v", encErr)
 			}
 			if _, writeErr := outFile.Write(encrypted); writeErr != nil {
-				return writeErr
+				return fmt.Errorf("write failed: %v", writeErr)
 			}
 		}
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("read failed: %v", err)
 		}
 	}
 	return nil
 }
 
-// FIXED: Add connection retry logic for Europe-US transfers
+// Add connection retry logic for Europe-US transfers
 func (tm *TransferManager) connectWithRetry(attempts int) error {
 	relays := []string{
 		"croc.schollz.com:9009",
@@ -934,7 +1044,7 @@ func (tm *TransferManager) getSecret() string {
 	return tm.currentSecret
 }
 
-// FIXED: Generate stronger transfer codes
+// Generate stronger transfer codes
 func generateSecureCode() string {
 	// Use OS random for better entropy
 	b := make([]byte, 9) // 72 bits of entropy

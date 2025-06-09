@@ -14,20 +14,10 @@ func main() {
 	// Set up better logging
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	// Fix working directory for macOS .app bundles
+	// FIXED: Improved working directory handling for macOS .app bundles
 	if runtime.GOOS == "darwin" {
-		// When launched as .app bundle, working directory might be wrong
-		if execPath, err := os.Executable(); err == nil {
-			// Check if we're running from a .app bundle
-			if filepath.Base(filepath.Dir(execPath)) == "MacOS" {
-				// We're in .app/Contents/MacOS/, move to .app/Contents/Resources/
-				resourcesDir := filepath.Join(filepath.Dir(filepath.Dir(execPath)), "Resources")
-				if _, err := os.Stat(resourcesDir); err == nil {
-					// Resources dir exists, but we should use the parent of .app
-					appDir := filepath.Dir(filepath.Dir(filepath.Dir(execPath)))
-					os.Chdir(appDir)
-				}
-			}
+		if err := setupMacOSWorkingDirectory(); err != nil {
+			log.Printf("Warning: Could not set proper working directory: %v", err)
 		}
 	}
 
@@ -69,6 +59,60 @@ func main() {
 
 	// This call blocks until the app is closed - critical for .app bundles
 	app.Run()
+}
+
+// FIXED: Improved macOS working directory setup
+func setupMacOSWorkingDirectory() error {
+	execPath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	// Check if we're running from a .app bundle
+	if filepath.Base(filepath.Dir(execPath)) == "MacOS" {
+		// We're in .app/Contents/MacOS/
+		contentsDir := filepath.Dir(execPath)
+		appDir := filepath.Dir(contentsDir)
+		
+		// Try to use the directory containing the .app bundle
+		parentDir := filepath.Dir(appDir)
+		
+		// Verify the parent directory is writable
+		testFile := filepath.Join(parentDir, ".trustdrop_test")
+		if f, err := os.Create(testFile); err == nil {
+			f.Close()
+			os.Remove(testFile)
+			
+			// Change to the parent directory (where .app is located)
+			if err := os.Chdir(parentDir); err == nil {
+				if os.Getenv("DEBUG") != "" {
+					fmt.Printf("Set working directory to: %s\n", parentDir)
+				}
+				return nil
+			}
+		}
+		
+		// Fallback: Use user's home directory
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		
+		trustDropDir := filepath.Join(homeDir, "TrustDrop")
+		if err := os.MkdirAll(trustDropDir, 0755); err != nil {
+			return err
+		}
+		
+		if err := os.Chdir(trustDropDir); err != nil {
+			return err
+		}
+		
+		if os.Getenv("DEBUG") != "" {
+			fmt.Printf("Set working directory to: %s\n", trustDropDir)
+		}
+	}
+	
+	return nil
 }
 
 func getCurrentDir() string {
