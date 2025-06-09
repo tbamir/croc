@@ -322,8 +322,9 @@ func (t *TrustDropApp) createSuccessView() {
 
 	// Open folder button for received files
 	t.openFolderBtn = widget.NewButtonWithIcon("Open Folder", theme.FolderOpenIcon(), func() {
-		// Open the received files folder
-		receivedPath := filepath.Join("data", "received")
+		// Open the received files folder using absolute path
+		currentDir, _ := os.Getwd()
+		receivedPath := filepath.Join(currentDir, "data", "received")
 		if _, err := os.Stat(receivedPath); err == nil {
 			// Try to open the folder in the system file manager
 			switch runtime.GOOS {
@@ -430,7 +431,10 @@ func (t *TrustDropApp) showSuccessView(message string) {
 
 	// Show additional UI elements for received files
 	if strings.Contains(message, "received") {
-		t.locationLabel.SetText("Files saved to: data/received/")
+		// Get current working directory and show actual path
+		currentDir, _ := os.Getwd()
+		receivedPath := filepath.Join(currentDir, "data", "received")
+		t.locationLabel.SetText(fmt.Sprintf("Files saved to:\n%s", receivedPath))
 		t.locationLabel.Show()
 		t.openFolderBtn.Show()
 	} else {
