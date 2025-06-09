@@ -14,6 +14,9 @@ func main() {
 	// Set up better logging
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
+	// Determine target directory for data storage
+	var targetDataDir string
+
 	// Fix working directory for macOS .app bundles
 	if runtime.GOOS == "darwin" {
 		// When launched as .app bundle, working directory might be wrong
@@ -26,12 +29,16 @@ func main() {
 				appBundlePath := filepath.Dir(filepath.Dir(filepath.Dir(execPath))) // Go up 3 levels
 				appParentDir := filepath.Dir(appBundlePath)                         // Get the directory containing the .app
 
-				if err := os.Chdir(appParentDir); err == nil {
-					// Show user where files will be saved
-					fmt.Printf("TrustDrop files will be saved to: %s/data/received/\n", appParentDir)
-				}
+				// Set target directory but don't change working directory
+				targetDataDir = appParentDir
+				fmt.Printf("TrustDrop files will be saved to: %s/data/received/\n", appParentDir)
 			}
 		}
+	}
+
+	// If no target directory set, use current working directory
+	if targetDataDir == "" {
+		targetDataDir, _ = os.Getwd()
 	}
 
 	// Only show console output in debug mode
@@ -41,11 +48,12 @@ func main() {
 		fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		fmt.Printf("Go Version: %s\n", runtime.Version())
 		fmt.Printf("Working Directory: %s\n", getCurrentDir())
+		fmt.Printf("Target Data Directory: %s\n", targetDataDir)
 		fmt.Printf("\n")
 	}
 
-	// Ensure data directories exist with secure permissions
-	if err := internal.EnsureDataDirectory(); err != nil {
+	// Ensure data directories exist in target location
+	if err := internal.EnsureDataDirectoryAtPath(targetDataDir); err != nil {
 		log.Fatalf("Failed to create data directories: %v", err)
 	}
 
@@ -59,13 +67,13 @@ func main() {
 		fmt.Println("• To SEND: Click 'Send Files', copy your code, then select files")
 		fmt.Println("• To RECEIVE: Click 'Receive Files' and enter the sender's code")
 		fmt.Println("• All transfers use AES-256 encryption and blockchain logging")
-		fmt.Printf("• Received files are saved to: %s\n", filepath.Join(getCurrentDir(), "data", "received"))
+		fmt.Printf("• Received files are saved to: %s\n", filepath.Join(targetDataDir, "data", "received"))
 		fmt.Println("===================")
 		fmt.Println("")
 	}
 
 	// Create and run the app - this blocks on the main thread
-	app, err := gui.NewTrustDropApp()
+	app, err := gui.NewTrustDropApp(targetDataDir)
 	if err != nil {
 		log.Fatalf("Failed to initialize TrustDrop: %v", err)
 	}

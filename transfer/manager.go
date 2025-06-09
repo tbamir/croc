@@ -38,6 +38,7 @@ type TransferManager struct {
 	filesComplete int
 	encryptionKey []byte
 	fileHashes    map[string]string
+	targetDataDir string // Directory where data should be saved
 
 	// FIXED: Enhanced progress tracking
 	lastProgressUpdate time.Time
@@ -70,13 +71,14 @@ type FileInfo struct {
 	AnonymizedName string `json:"anonymized_name"`
 }
 
-func NewTransferManager() (*TransferManager, error) {
+func NewTransferManager(targetDataDir string) (*TransferManager, error) {
 	// FIXED: Generate stronger local peer ID using secure random
 	localPeerID := generateSecureCode()
 
 	// Only show debug output when DEBUG environment variable is set
 	if os.Getenv("DEBUG") != "" {
 		fmt.Printf("TransferManager: Generated local peer ID: %s\n", localPeerID)
+		fmt.Printf("TransferManager: Target data directory: %s\n", targetDataDir)
 	}
 
 	// Initialize logger with blockchain
@@ -93,6 +95,7 @@ func NewTransferManager() (*TransferManager, error) {
 		fileHashes:       make(map[string]string),
 		progressThrottle: 100 * time.Millisecond,
 		overallProgress:  0.0,
+		targetDataDir:    targetDataDir,
 	}, nil
 }
 
@@ -336,20 +339,18 @@ func (tm *TransferManager) receiveFiles() {
 		tm.mutex.Unlock()
 	}()
 
-	// Create temporary directory for encrypted files
-	tempDir := filepath.Join("data", "temp", fmt.Sprintf("receive-%d", time.Now().Unix()))
+	// Create temporary directory for encrypted files in the current working directory
+	tempDir := filepath.Join("temp", fmt.Sprintf("receive-%d", time.Now().Unix()))
 	if err := os.MkdirAll(tempDir, 0700); err != nil {
 		tm.updateStatus(fmt.Sprintf("Failed to create temp directory: %v", err))
 		return
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Get current working directory (this should be the correct location now)
-	currentWorkingDir, _ := os.Getwd()
-
-	// Change to temp directory for receiving
+	// Save current working directory and change to temp directory for receiving
+	originalWorkingDir, _ := os.Getwd()
 	os.Chdir(tempDir)
-	defer os.Chdir(currentWorkingDir)
+	defer os.Chdir(originalWorkingDir)
 
 	// FIXED: Use connection retry logic for better Europe-US connectivity
 	if err := tm.connectWithRetry(5); err != nil {
@@ -404,12 +405,12 @@ func (tm *TransferManager) receiveFiles() {
 	}
 
 	if !manifestFound {
-		tm.fallbackDecryption(files, currentWorkingDir)
+		tm.fallbackDecryption(files, tm.targetDataDir)
 		return
 	}
 
-	// Create base directory if folder was sent - use current working directory
-	baseDir := filepath.Join(currentWorkingDir, "data", "received")
+	// Create base directory if folder was sent - use target data directory
+	baseDir := filepath.Join(tm.targetDataDir, "data", "received")
 	if manifest.FolderName != "" {
 		baseDir = filepath.Join(baseDir, manifest.FolderName)
 	}
@@ -445,8 +446,8 @@ func (tm *TransferManager) receiveFiles() {
 		// Find original path from manifest
 		fileInfo, exists := manifest.Files[file]
 		if !exists {
-			// Fallback to hash name - use current working directory
-			finalPath := filepath.Join(currentWorkingDir, "data", "received", file)
+			// Fallback to hash name - use target data directory
+			finalPath := filepath.Join(tm.targetDataDir, "data", "received", file)
 			os.MkdirAll(filepath.Dir(finalPath), 0755)
 			if err := os.WriteFile(finalPath, decData, 0644); err == nil {
 				successCount++
@@ -493,10 +494,10 @@ func (tm *TransferManager) receiveFiles() {
 	}
 }
 
-func (tm *TransferManager) fallbackDecryption(files []string, currentWorkingDir string) {
+func (tm *TransferManager) fallbackDecryption(files []string, targetDataDir string) {
 	// Fallback mode when no manifest is available
 	successCount := 0
-	baseDir := filepath.Join(currentWorkingDir, "data", "received")
+	baseDir := filepath.Join(targetDataDir, "data", "received")
 
 	// FIXED: Create base directory
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
@@ -586,7 +587,7 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	}()
 
 	// Create temporary directory for encrypted files
-	tempDir := filepath.Join("data", "temp", fmt.Sprintf("send-%d", time.Now().Unix()))
+	tempDir := filepath.Join("temp", fmt.Sprintf("send-%d", time.Now().Unix()))
 	if err := os.MkdirAll(tempDir, 0700); err != nil {
 		tm.updateStatus(fmt.Sprintf("Failed to create temp directory: %v", err))
 		return

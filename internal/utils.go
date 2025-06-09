@@ -27,6 +27,24 @@ func EnsureDataDirectory() error {
 	return nil
 }
 
+// EnsureDataDirectoryAtPath creates the data directory structure at a specific path
+func EnsureDataDirectoryAtPath(basePath string) error {
+	dirs := []string{
+		filepath.Join(basePath, "data"),
+		filepath.Join(basePath, "data", "received"),
+		filepath.Join(basePath, "data", "temp"),
+		filepath.Join(basePath, "logs"),
+	}
+
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+	}
+
+	return nil
+}
+
 // FormatFileSize formats file size in human readable format
 func FormatFileSize(bytes int64) string {
 	const unit = 1024
@@ -57,9 +75,19 @@ func GetReceivedFilesPath() string {
 	return filepath.Join("data", "received")
 }
 
+// GetReceivedFilesPathAtBase returns the path where received files are stored at a specific base path
+func GetReceivedFilesPathAtBase(basePath string) string {
+	return filepath.Join(basePath, "data", "received")
+}
+
 // GetTempPath returns the path for temporary files
 func GetTempPath() string {
 	return filepath.Join("data", "temp")
+}
+
+// GetTempPathAtBase returns the path for temporary files at a specific base path
+func GetTempPathAtBase(basePath string) string {
+	return filepath.Join(basePath, "data", "temp")
 }
 
 // FileExists checks if a file exists

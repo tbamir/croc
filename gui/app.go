@@ -62,9 +62,10 @@ type TrustDropApp struct {
 	mutex           sync.Mutex
 	isTransferring  bool
 	selectionDialog *dialog.CustomDialog
+	targetDataDir   string // Directory where data should be saved
 }
 
-func NewTrustDropApp() (*TrustDropApp, error) {
+func NewTrustDropApp(targetDataDir string) (*TrustDropApp, error) {
 	myApp := app.New()
 	myApp.Settings().SetTheme(&trustDropTheme{})
 
@@ -72,7 +73,7 @@ func NewTrustDropApp() (*TrustDropApp, error) {
 	window.Resize(fyne.NewSize(420, 500))
 	window.CenterOnScreen()
 
-	transferManager, err := transfer.NewTransferManager()
+	transferManager, err := transfer.NewTransferManager(targetDataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize: %w", err)
 	}
@@ -83,6 +84,7 @@ func NewTrustDropApp() (*TrustDropApp, error) {
 		transferManager: transferManager,
 		currentView:     "main",
 		isTransferring:  false,
+		targetDataDir:   targetDataDir,
 	}
 
 	// Set up callbacks with proper thread safety
@@ -322,9 +324,8 @@ func (t *TrustDropApp) createSuccessView() {
 
 	// Open folder button for received files
 	t.openFolderBtn = widget.NewButtonWithIcon("Open Folder", theme.FolderOpenIcon(), func() {
-		// Open the received files folder using absolute path
-		currentDir, _ := os.Getwd()
-		receivedPath := filepath.Join(currentDir, "data", "received")
+		// Open the received files folder using target data directory
+		receivedPath := filepath.Join(t.targetDataDir, "data", "received")
 		if _, err := os.Stat(receivedPath); err == nil {
 			// Try to open the folder in the system file manager
 			switch runtime.GOOS {
@@ -431,9 +432,8 @@ func (t *TrustDropApp) showSuccessView(message string) {
 
 	// Show additional UI elements for received files
 	if strings.Contains(message, "received") {
-		// Get current working directory and show actual path
-		currentDir, _ := os.Getwd()
-		receivedPath := filepath.Join(currentDir, "data", "received")
+		// Show the actual target path where files are saved
+		receivedPath := filepath.Join(t.targetDataDir, "data", "received")
 		t.locationLabel.SetText(fmt.Sprintf("Files saved to:\n%s", receivedPath))
 		t.locationLabel.Show()
 		t.openFolderBtn.Show()
