@@ -431,16 +431,34 @@ func (tm *TransferManager) receiveFiles() {
 
 		tm.updateIncrementalProgress(0, fmt.Sprintf("Decrypting %s", file))
 
-		// Read encrypted file
+		// Read encrypted file to check if it's chunked format
 		encData, err := os.ReadFile(file)
 		if err != nil {
 			continue
 		}
 
-		// Decrypt the file
-		decData, err := security.DecryptAES256CBC(encData, tm.encryptionKey)
-		if err != nil {
-			continue
+		var decData []byte
+
+		// Check if this is a chunked encrypted file
+		if len(encData) > 10*1024*1024 { // Files over 10MB might be chunked
+			// Try chunked decryption first
+			tempDecFile := filepath.Join("temp", fmt.Sprintf("dec-%d", time.Now().UnixNano()))
+			if chunkErr := tm.decryptFileChunked(file, tempDecFile); chunkErr == nil {
+				// Chunked decryption succeeded, read the result
+				if tempData, readErr := os.ReadFile(tempDecFile); readErr == nil {
+					decData = tempData
+				}
+				os.Remove(tempDecFile) // Clean up temp file
+			}
+		}
+
+		// If chunked decryption failed or wasn't attempted, try regular decryption
+		if decData == nil {
+			var decErr error
+			decData, decErr = security.DecryptAES256CBC(encData, tm.encryptionKey)
+			if decErr != nil {
+				continue
+			}
 		}
 
 		// Find original path from manifest
@@ -515,9 +533,28 @@ func (tm *TransferManager) fallbackDecryption(files []string, targetDataDir stri
 			continue
 		}
 
-		decData, err := security.DecryptAES256CBC(encData, tm.encryptionKey)
-		if err != nil {
-			continue
+		var decData []byte
+
+		// Check if this is a chunked encrypted file
+		if len(encData) > 10*1024*1024 { // Files over 10MB might be chunked
+			// Try chunked decryption first
+			tempDecFile := filepath.Join("temp", fmt.Sprintf("dec-%d", time.Now().UnixNano()))
+			if chunkErr := tm.decryptFileChunked(encFile, tempDecFile); chunkErr == nil {
+				// Chunked decryption succeeded, read the result
+				if tempData, readErr := os.ReadFile(tempDecFile); readErr == nil {
+					decData = tempData
+				}
+				os.Remove(tempDecFile) // Clean up temp file
+			}
+		}
+
+		// If chunked decryption failed or wasn't attempted, try regular decryption
+		if decData == nil {
+			var decErr error
+			decData, decErr = security.DecryptAES256CBC(encData, tm.encryptionKey)
+			if decErr != nil {
+				continue
+			}
 		}
 
 		// FIXED: Use strings.TrimSuffix unconditionally
@@ -866,6 +903,17 @@ func (tm *TransferManager) encryptFileChunked(filePath, encPath string) error {
 			if encErr != nil {
 				return encErr
 			}
+
+			// Write the size of this encrypted chunk first (4 bytes)
+			sizeBytes := make([]byte, 4)
+			sizeBytes[0] = byte(len(encrypted) >> 24)
+			sizeBytes[1] = byte(len(encrypted) >> 16)
+			sizeBytes[2] = byte(len(encrypted) >> 8)
+			sizeBytes[3] = byte(len(encrypted))
+
+			if _, writeErr := outFile.Write(sizeBytes); writeErr != nil {
+				return writeErr
+			}
 			if _, writeErr := outFile.Write(encrypted); writeErr != nil {
 				return writeErr
 			}
@@ -957,4 +1005,67 @@ func generateSecureCode() string {
 	}
 	code += fmt.Sprintf("%d", binary.BigEndian.Uint16(b[7:9]))
 	return code
+}
+
+// FIXED: Add chunked file decryption to match chunked encryption
+func (tm *TransferManager) decryptFileChunked(encPath, decPath string) error {
+	encFile, err := os.Open(encPath)
+	if err != nil {
+		return err
+	}
+	defer encFile.Close()
+
+	decFile, err := os.Create(decPath)
+	if err != nil {
+		return err
+	}
+	defer decFile.Close()
+
+	// Read chunks with size headers
+	for {
+		// Read chunk size (4 bytes)
+		sizeBytes := make([]byte, 4)
+		n, err := encFile.Read(sizeBytes)
+		if n == 0 || err == io.EOF {
+			break
+		}
+		if n != 4 || err != nil {
+			return fmt.Errorf("failed to read chunk size")
+		}
+
+		// Calculate chunk size
+		chunkSize := int(sizeBytes[0])<<24 | int(sizeBytes[1])<<16 | int(sizeBytes[2])<<8 | int(sizeBytes[3])
+		if chunkSize <= 0 || chunkSize > 20*1024*1024 { // Sanity check
+			return fmt.Errorf("invalid chunk size: %d", chunkSize)
+		}
+
+		// Read the encrypted chunk
+		encChunk := make([]byte, chunkSize)
+		n, err = encFile.Read(encChunk)
+		if n != chunkSize || err != nil {
+			return fmt.Errorf("failed to read encrypted chunk")
+		}
+
+		// Decrypt the chunk
+		decrypted, decErr := security.DecryptAES256CBC(encChunk, tm.encryptionKey)
+		if decErr != nil {
+			return decErr
+		}
+
+		// Write decrypted data
+		if _, writeErr := decFile.Write(decrypted); writeErr != nil {
+			return writeErr
+		}
+	}
+	return nil
+}
+
+// EncryptFileChunked encrypts a file in chunks to prevent memory issues with large files
+func (tm *TransferManager) EncryptFileChunked(filePath, encPath string) error {
+	return tm.encryptFileChunked(filePath, encPath)
+}
+
+// DecryptFileChunked decrypts a chunked encrypted file
+func (tm *TransferManager) DecryptFileChunked(encPath, decPath string) error {
+	return tm.decryptFileChunked(encPath, decPath)
 }
