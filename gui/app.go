@@ -63,9 +63,10 @@ type TrustDropApp struct {
 	isTransferring  bool
 	selectionDialog *dialog.CustomDialog
 	
-	// FIXED: Add error tracking
-	lastError       error
-	transferSuccess bool
+	// FIXED: Enhanced error tracking and status management
+	lastError         error
+	transferSuccess   bool
+	transferInProgress bool
 }
 
 func NewTrustDropApp() (*TrustDropApp, error) {
@@ -82,17 +83,18 @@ func NewTrustDropApp() (*TrustDropApp, error) {
 	}
 
 	app := &TrustDropApp{
-		app:             myApp,
-		window:          window,
-		transferManager: transferManager,
-		currentView:     "main",
-		isTransferring:  false,
-		transferSuccess: false,
+		app:               myApp,
+		window:            window,
+		transferManager:   transferManager,
+		currentView:       "main",
+		isTransferring:    false,
+		transferSuccess:   false,
+		transferInProgress: false,
 	}
 
-	// Set up callbacks with proper thread safety
-	transferManager.SetStatusCallback(app.onStatusUpdate)
-	transferManager.SetProgressCallback(app.onProgressUpdate)
+	// FIXED: Set up callbacks with proper thread safety using fyne.Do()
+	transferManager.SetStatusCallback(app.onStatusUpdateThreadSafe)
+	transferManager.SetProgressCallback(app.onProgressUpdateThreadSafe)
 
 	return app, nil
 }
@@ -163,7 +165,10 @@ func (t *TrustDropApp) createSendView() {
 		t.window.Clipboard().SetContent(t.transferManager.GetLocalPeerID())
 		t.copyButton.SetText("Copied!")
 		time.AfterFunc(2*time.Second, func() {
-			t.copyButton.SetText("Copy Code")
+			// FIXED: Thread-safe UI update
+			fyne.Do(func() {
+				t.copyButton.SetText("Copy Code")
+			})
 		})
 	})
 
@@ -363,17 +368,22 @@ func (t *TrustDropApp) createSuccessView() {
 	t.successCard = widget.NewCard("Success", "", content)
 }
 
-// Add state reset methods
+// FIXED: Enhanced state reset methods with thread safety
 func (t *TrustDropApp) resetSendView() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
 	t.isTransferring = false
 	t.transferSuccess = false
+	t.transferInProgress = false
 	t.lastError = nil
-	t.selectButton.Enable()
-	t.waitingLabel.Hide()
-	t.waitingLabel.SetText("Share the code above with the receiver")
+	
+	// FIXED: Thread-safe UI updates
+	fyne.Do(func() {
+		t.selectButton.Enable()
+		t.waitingLabel.Hide()
+		t.waitingLabel.SetText("Share the code above with the receiver")
+	})
 }
 
 func (t *TrustDropApp) resetTransferState() {
@@ -382,15 +392,20 @@ func (t *TrustDropApp) resetTransferState() {
 
 	t.isTransferring = false
 	t.transferSuccess = false
+	t.transferInProgress = false
 	t.lastError = nil
-	t.selectButton.Enable()
-	t.waitingLabel.Hide()
-	t.statusLabel.SetText("Transfer in progress, please wait...")
-	t.detailLabel.SetText("This may take a few moments depending on file size and network speed.")
+	
+	// FIXED: Thread-safe UI updates
+	fyne.Do(func() {
+		t.selectButton.Enable()
+		t.waitingLabel.Hide()
+		t.statusLabel.SetText("Transfer in progress, please wait...")
+		t.detailLabel.SetText("This may take a few moments depending on file size and network speed.")
 
-	// Reset success view elements
-	t.locationLabel.Hide()
-	t.openFolderBtn.Hide()
+		// Reset success view elements
+		t.locationLabel.Hide()
+		t.openFolderBtn.Hide()
+	})
 }
 
 // View switching methods
@@ -399,8 +414,11 @@ func (t *TrustDropApp) showMainView() {
 	t.currentView = "main"
 	t.mutex.Unlock()
 
-	t.window.SetContent(container.NewPadded(t.mainContent))
-	t.codeEntry.SetText("") // Clear any entered code
+	// FIXED: Thread-safe UI updates
+	fyne.Do(func() {
+		t.window.SetContent(container.NewPadded(t.mainContent))
+		t.codeEntry.SetText("") // Clear any entered code
+	})
 }
 
 func (t *TrustDropApp) showSendView() {
@@ -408,8 +426,11 @@ func (t *TrustDropApp) showSendView() {
 	t.currentView = "send"
 	t.mutex.Unlock()
 
-	t.window.SetContent(container.NewPadded(t.sendCard))
-	t.waitingLabel.Hide()
+	// FIXED: Thread-safe UI updates
+	fyne.Do(func() {
+		t.window.SetContent(container.NewPadded(t.sendCard))
+		t.waitingLabel.Hide()
+	})
 }
 
 func (t *TrustDropApp) showReceiveView() {
@@ -417,40 +438,51 @@ func (t *TrustDropApp) showReceiveView() {
 	t.currentView = "receive"
 	t.mutex.Unlock()
 
-	t.window.SetContent(container.NewPadded(t.receiveCard))
+	// FIXED: Thread-safe UI updates
+	fyne.Do(func() {
+		t.window.SetContent(container.NewPadded(t.receiveCard))
+	})
 }
 
 func (t *TrustDropApp) showProgressView() {
 	t.mutex.Lock()
 	t.currentView = "progress"
 	t.isTransferring = true
+	t.transferInProgress = true
 	t.mutex.Unlock()
 
-	t.window.SetContent(container.NewPadded(t.progressCard))
+	// FIXED: Thread-safe UI updates
+	fyne.Do(func() {
+		t.window.SetContent(container.NewPadded(t.progressCard))
+	})
 }
 
 func (t *TrustDropApp) showSuccessView(message string) {
 	t.mutex.Lock()
 	t.currentView = "success"
 	t.isTransferring = false
+	t.transferInProgress = false
 	t.transferSuccess = true
 	t.mutex.Unlock()
 
-	t.successMessage.SetText(message)
+	// FIXED: Thread-safe UI updates
+	fyne.Do(func() {
+		t.successMessage.SetText(message)
 
-	// Show additional UI elements for received files
-	if strings.Contains(message, "received") {
-		receivedPath, _ := filepath.Abs(filepath.Join("data", "received"))
-		t.locationLabel.SetText(fmt.Sprintf("Files saved to: %s", receivedPath))
-		t.locationLabel.Show()
-		t.openFolderBtn.Show()
-	} else {
-		// Hide for sent files
-		t.locationLabel.Hide()
-		t.openFolderBtn.Hide()
-	}
+		// Show additional UI elements for received files
+		if strings.Contains(message, "received") {
+			receivedPath, _ := filepath.Abs(filepath.Join("data", "received"))
+			t.locationLabel.SetText(fmt.Sprintf("Files saved to: %s", receivedPath))
+			t.locationLabel.Show()
+			t.openFolderBtn.Show()
+		} else {
+			// Hide for sent files
+			t.locationLabel.Hide()
+			t.openFolderBtn.Hide()
+		}
 
-	t.window.SetContent(container.NewPadded(t.successCard))
+		t.window.SetContent(container.NewPadded(t.successCard))
+	})
 }
 
 // FIXED: Simplified file/folder selection with auto-closing dialog
@@ -484,10 +516,13 @@ func (t *TrustDropApp) onSelectFiles() {
 	t.selectionDialog.Show()
 }
 
-// FIXED: Single file selection method - CRITICAL FIX HERE
+// FIXED: Single file selection method with enhanced error handling
 func (t *TrustDropApp) selectSingleFile() {
 	fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
 		if err != nil || reader == nil {
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("file selection failed: %v", err), t.window)
+			}
 			return
 		}
 		reader.Close()
@@ -507,10 +542,6 @@ func (t *TrustDropApp) selectSingleFile() {
 
 		t.startSend([]string{path})
 	}, t.window)
-
-	// CRITICAL FIX: DO NOT set any filters - let all files show
-	// The previous empty filter was blocking ALL files from appearing
-	// By not setting any filter, Fyne shows all files by default
 
 	// Set initial location to user's home directory for better UX
 	if homeDir, err := os.UserHomeDir(); err == nil {
@@ -555,16 +586,20 @@ func (t *TrustDropApp) startSend(paths []string) {
 		return
 	}
 
-	// FIXED: Reset error state before starting
+	// FIXED: Enhanced state management and error handling
 	t.mutex.Lock()
 	t.isTransferring = true
+	t.transferInProgress = true
 	t.transferSuccess = false
 	t.lastError = nil
 	t.mutex.Unlock()
 
-	// Update UI to show waiting state
-	t.waitingLabel.Show()
-	t.waitingLabel.SetText("Waiting for receiver to connect...")
+	// FIXED: Thread-safe UI updates
+	fyne.Do(func() {
+		t.waitingLabel.Show()
+		t.waitingLabel.SetText("Waiting for receiver to connect...")
+		t.selectButton.Disable()
+	})
 
 	// Start transfer in background
 	go func() {
@@ -572,44 +607,55 @@ func (t *TrustDropApp) startSend(paths []string) {
 		
 		t.mutex.Lock()
 		t.lastError = err
+		t.transferInProgress = false
 		t.mutex.Unlock()
 		
 		if err != nil {
-			// Re-enable button on error
-			t.mutex.Lock()
-			t.isTransferring = false
-			t.transferSuccess = false
-			t.mutex.Unlock()
+			// FIXED: Thread-safe error handling
+			fyne.Do(func() {
+				t.mutex.Lock()
+				t.isTransferring = false
+				t.transferSuccess = false
+				t.mutex.Unlock()
 
-			t.waitingLabel.Hide()
+				t.waitingLabel.Hide()
+				t.selectButton.Enable()
 
-			// FIXED: Show detailed error to user
-			dialog.ShowError(fmt.Errorf("transfer failed: %v", err), t.window)
-			t.window.Canvas().Content().Refresh()
+				// Show detailed error to user
+				dialog.ShowError(fmt.Errorf("transfer failed: %v", err), t.window)
+			})
 		}
 	}()
 }
 
 func (t *TrustDropApp) onStartReceive(code string) {
-	// FIXED: Reset error state before starting
+	// FIXED: Enhanced state management and error handling
 	t.mutex.Lock()
+	t.transferInProgress = true
 	t.transferSuccess = false
 	t.lastError = nil
 	t.mutex.Unlock()
 	
 	t.showProgressView()
-	t.statusLabel.SetText("Connecting to sender...")
+	
+	// FIXED: Thread-safe UI updates
+	fyne.Do(func() {
+		t.statusLabel.SetText("Connecting to sender...")
+	})
 
 	go func() {
 		err := t.transferManager.StartReceive(code)
 		
 		t.mutex.Lock()
 		t.lastError = err
+		t.transferInProgress = false
 		t.mutex.Unlock()
 		
 		if err != nil {
-			// FIXED: Show detailed error to user
-			dialog.ShowError(fmt.Errorf("receive failed: %v", err), t.window)
+			// FIXED: Thread-safe error handling
+			fyne.Do(func() {
+				dialog.ShowError(fmt.Errorf("receive failed: %v", err), t.window)
+			})
 			
 			// Return to receive view on error
 			time.Sleep(time.Second) // Brief delay so user sees the error
@@ -619,16 +665,26 @@ func (t *TrustDropApp) onStartReceive(code string) {
 	}()
 }
 
-// FIXED: Enhanced status update with proper error checking
+// FIXED: Thread-safe status update wrapper
+func (t *TrustDropApp) onStatusUpdateThreadSafe(status string) {
+	// All UI updates must happen in main thread via fyne.Do()
+	fyne.Do(func() {
+		t.onStatusUpdate(status)
+	})
+}
+
+// FIXED: Enhanced status update with proper error checking and thread safety
 func (t *TrustDropApp) onStatusUpdate(status string) {
 	t.mutex.Lock()
 	currentView := t.currentView
+	transferInProgress := t.transferInProgress
 	t.mutex.Unlock()
 
 	// Check for error conditions first
 	if strings.Contains(status, "failed") || strings.Contains(status, "error") {
 		t.mutex.Lock()
 		t.transferSuccess = false
+		t.transferInProgress = false
 		t.mutex.Unlock()
 		
 		// Show error immediately
@@ -640,12 +696,17 @@ func (t *TrustDropApp) onStatusUpdate(status string) {
 		// Return to appropriate view
 		if currentView == "progress" {
 			t.resetTransferState()
-			if strings.Contains(currentView, "send") {
+			if strings.Contains(status, "send") {
 				t.showSendView()
 			} else {
 				t.showReceiveView()
 			}
 		}
+		return
+	}
+
+	// Only proceed if transfer is actually in progress
+	if !transferInProgress {
 		return
 	}
 
@@ -667,13 +728,15 @@ func (t *TrustDropApp) onStatusUpdate(status string) {
 		t.statusLabel.SetText(userStatus)
 	}
 
-	// Handle successful completion - ONLY show success if transfer actually worked
+	// FIXED: Only show success if transfer actually completed successfully
 	if strings.Contains(status, "successfully") && !strings.Contains(status, "failed") {
 		t.mutex.Lock()
 		hasError := t.lastError != nil
+		stillInProgress := t.transferInProgress
 		t.mutex.Unlock()
 		
-		if !hasError {
+		// Only show success if no errors AND transfer actually completed
+		if !hasError && !stillInProgress {
 			var message string
 			if strings.Contains(status, "received") || strings.Contains(status, "decrypted") {
 				message = "Files received successfully!"
@@ -691,13 +754,23 @@ func (t *TrustDropApp) onStatusUpdate(status string) {
 	}
 }
 
-// Progress updates remain the same but with better error checking
+// FIXED: Thread-safe progress update wrapper
+func (t *TrustDropApp) onProgressUpdateThreadSafe(progress transfer.TransferProgress) {
+	// All UI updates must happen in main thread via fyne.Do()
+	fyne.Do(func() {
+		t.onProgressUpdate(progress)
+	})
+}
+
+// FIXED: Progress updates with better error checking and thread safety
 func (t *TrustDropApp) onProgressUpdate(progress transfer.TransferProgress) {
 	t.mutex.Lock()
 	currentView := t.currentView
+	transferInProgress := t.transferInProgress
 	t.mutex.Unlock()
 
-	if currentView == "progress" {
+	// Only update progress if we're actually transferring and in progress view
+	if currentView == "progress" && transferInProgress {
 		// Update detail label with current file info
 		if progress.CurrentFile != "" {
 			fileName := filepath.Base(progress.CurrentFile)

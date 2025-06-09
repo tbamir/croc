@@ -284,5 +284,15 @@
     "status": "cancelled",
     "error": "User cancelled",
     "duration": "12.048029167s"
+  },
+  {
+    "timestamp": "2025-06-09T14:33:57.711505-05:00",
+    "peer_id": "india-tango-alpha-8574",
+    "file_name": "global_traffic_accidents.csv",
+    "file_hash": "9e9f00e8e9cbbd057097de8fc11006a69c7bc0ac836732dc158dd19de887625c",
+    "file_size": 967468,
+    "direction": "receive",
+    "status": "success",
+    "duration": "394.162834ms"
   }
 ]

@@ -10,14 +10,20 @@ import (
 	"time"
 )
 
-// EnsureDataDirectory creates the data directory structure if it doesn't exist
+// FIXED: Enhanced data directory creation with better error handling
 func EnsureDataDirectory() error {
-	// FIXED: Get current working directory and create absolute paths
+	// Get current working directory with fallback
 	workingDir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
+		// Fallback to executable directory
+		if execPath, execErr := os.Executable(); execErr == nil {
+			workingDir = filepath.Dir(execPath)
+		} else {
+			return fmt.Errorf("failed to determine working directory: %w", err)
+		}
 	}
 
+	// FIXED: Create directories with absolute paths and better error handling
 	dirs := []string{
 		filepath.Join(workingDir, "data"),
 		filepath.Join(workingDir, "data", "received"),
@@ -27,26 +33,50 @@ func EnsureDataDirectory() error {
 	}
 
 	for _, dir := range dirs {
+		// Create directory with proper permissions
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
 		
-		// FIXED: Verify directory was actually created and is writable
+		// FIXED: Enhanced verification that directory exists and is writable
 		if !FileExists(dir) {
 			return fmt.Errorf("directory %s was not created successfully", dir)
 		}
 		
-		// Test write permissions
-		testFile := filepath.Join(dir, ".write_test")
-		if f, err := os.Create(testFile); err != nil {
+		// Test write permissions with better error handling
+		if err := testWritePermissions(dir); err != nil {
 			return fmt.Errorf("directory %s is not writable: %w", dir, err)
-		} else {
-			f.Close()
-			os.Remove(testFile)
 		}
 	}
 
 	return nil
+}
+
+// FIXED: Enhanced write permission testing
+func testWritePermissions(dir string) error {
+	testFile := filepath.Join(dir, fmt.Sprintf(".write_test_%d", time.Now().UnixNano()))
+	f, err := os.Create(testFile)
+	if err != nil {
+		return err
+	}
+	
+	// Write a small test
+	if _, err := f.WriteString("test"); err != nil {
+		f.Close()
+		os.Remove(testFile)
+		return err
+	}
+	
+	f.Close()
+	
+	// Verify we can read it back
+	if data, err := os.ReadFile(testFile); err != nil || string(data) != "test" {
+		os.Remove(testFile)
+		return fmt.Errorf("read test failed")
+	}
+	
+	// Clean up
+	return os.Remove(testFile)
 }
 
 // FormatFileSize formats file size in human readable format
@@ -74,20 +104,29 @@ func FormatDuration(d time.Duration) string {
 	}
 }
 
-// GetReceivedFilesPath returns the absolute path where received files are stored
+// FIXED: Enhanced path resolution functions
 func GetReceivedFilesPath() string {
 	workingDir, err := os.Getwd()
 	if err != nil {
-		return filepath.Join("data", "received") // fallback to relative
+		// Fallback to executable directory
+		if execPath, execErr := os.Executable(); execErr == nil {
+			workingDir = filepath.Dir(execPath)
+		} else {
+			return filepath.Join("data", "received") // last resort fallback
+		}
 	}
 	return filepath.Join(workingDir, "data", "received")
 }
 
-// GetTempPath returns the absolute path for temporary files
 func GetTempPath() string {
 	workingDir, err := os.Getwd()
 	if err != nil {
-		return filepath.Join("data", "temp") // fallback to relative
+		// Fallback to executable directory
+		if execPath, execErr := os.Executable(); execErr == nil {
+			workingDir = filepath.Dir(execPath)
+		} else {
+			return filepath.Join("data", "temp") // last resort fallback
+		}
 	}
 	return filepath.Join(workingDir, "data", "temp")
 }
@@ -98,14 +137,22 @@ func FileExists(path string) bool {
 	return !os.IsNotExist(err)
 }
 
-// FIXED: Enhanced cross-platform path resolution
+// FIXED: Enhanced cross-platform path resolution with better error handling
 func ResolvePath(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("empty path provided")
+	}
+
 	// Handle different path formats across platforms
 	switch runtime.GOOS {
 	case "windows":
 		// Fix Windows paths that start with / but should be drive letters
 		if strings.HasPrefix(path, "/") && len(path) > 1 && path[2] == ':' {
 			path = path[1:] // Remove leading slash
+		}
+		// Handle UNC paths
+		if strings.HasPrefix(path, "//") {
+			return filepath.Abs(path)
 		}
 	case "darwin", "linux":
 		// Expand ~ to home directory on Unix systems
@@ -116,6 +163,14 @@ func ResolvePath(path string) (string, error) {
 			}
 			path = filepath.Join(homeDir, path[2:])
 		}
+		// Handle relative paths starting with ./
+		if strings.HasPrefix(path, "./") {
+			workingDir, err := os.Getwd()
+			if err != nil {
+				return "", fmt.Errorf("failed to get working directory: %w", err)
+			}
+			path = filepath.Join(workingDir, path[2:])
+		}
 	}
 
 	// Convert to absolute path
@@ -124,12 +179,15 @@ func ResolvePath(path string) (string, error) {
 		return "", fmt.Errorf("failed to resolve absolute path: %w", err)
 	}
 
+	// Clean the path to remove any .. or . components
+	cleanPath := filepath.Clean(absPath)
+
 	// Verify the path exists and is accessible
-	if _, err := os.Stat(absPath); err != nil {
+	if _, err := os.Stat(cleanPath); err != nil {
 		return "", fmt.Errorf("path does not exist or is not accessible: %w", err)
 	}
 
-	return absPath, nil
+	return cleanPath, nil
 }
 
 // FIXED: Enhanced filename sanitization with better Unicode handling
@@ -228,7 +286,7 @@ func SanitizePath(path string) string {
 	return filepath.Join(dir, sanitizedFilename)
 }
 
-// FIXED: Add cross-platform file operations helpers
+// FIXED: Enhanced file operations with better error handling
 func CopyFile(src, dst string) error {
 	// Resolve source path
 	srcPath, err := ResolvePath(src)
@@ -278,30 +336,34 @@ func EnsureWritableDirectory(path string) error {
 	}
 
 	// Test write permissions
-	testFile := filepath.Join(path, ".write_test_"+fmt.Sprintf("%d", time.Now().Unix()))
-	f, err := os.Create(testFile)
-	if err != nil {
-		return fmt.Errorf("directory %s is not writable: %w", path, err)
-	}
-	f.Close()
-	os.Remove(testFile)
-
-	return nil
+	return testWritePermissions(path)
 }
 
-// GetAbsolutePath returns the absolute path, handling cross-platform issues
+// FIXED: Enhanced absolute path resolution
 func GetAbsolutePath(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("empty path provided")
+	}
+
 	// First try to resolve any platform-specific path issues
 	resolvedPath, err := ResolvePath(path)
 	if err != nil {
 		// If resolution fails, try to get absolute path directly
-		return filepath.Abs(path)
+		absPath, absErr := filepath.Abs(path)
+		if absErr != nil {
+			return "", fmt.Errorf("failed to resolve path: %w (original error: %v)", absErr, err)
+		}
+		return absPath, nil
 	}
 	return resolvedPath, nil
 }
 
 // ValidateTransferPath validates that a path is safe for file transfer operations
 func ValidateTransferPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("empty path provided")
+	}
+
 	// Check for null bytes (security issue)
 	if strings.Contains(path, "\x00") {
 		return fmt.Errorf("path contains null bytes")
@@ -324,4 +386,71 @@ func ValidateTransferPath(path string) error {
 	}
 
 	return nil
+}
+
+// FIXED: Add helper function to detect if running as built application
+func IsBuiltApplication() bool {
+	execPath, err := os.Executable()
+	if err != nil {
+		return false
+	}
+
+	switch runtime.GOOS {
+	case "darwin":
+		// Check if running from .app bundle
+		return strings.Contains(execPath, ".app/Contents/MacOS/")
+	case "windows":
+		// Check if executable name suggests it's a built binary
+		return strings.HasSuffix(strings.ToLower(execPath), ".exe")
+	case "linux":
+		// Check if running from a typical binary location
+		return !strings.Contains(execPath, "go-build")
+	}
+
+	return false
+}
+
+// FIXED: Get appropriate working directory for built applications
+func GetWorkingDirectory() (string, error) {
+	if IsBuiltApplication() {
+		execPath, err := os.Executable()
+		if err != nil {
+			return "", err
+		}
+
+		switch runtime.GOOS {
+		case "darwin":
+			// For .app bundles, try to use a user-accessible directory
+			if strings.Contains(execPath, ".app/Contents/MacOS/") {
+				homeDir, err := os.UserHomeDir()
+				if err == nil {
+					trustDropDir := filepath.Join(homeDir, "Documents", "TrustDrop")
+					if err := os.MkdirAll(trustDropDir, 0755); err == nil {
+						return trustDropDir, nil
+					}
+				}
+			}
+			return filepath.Dir(execPath), nil
+		case "windows":
+			// For Windows .exe, try to use executable directory
+			execDir := filepath.Dir(execPath)
+			if testWritePermissions(execDir) == nil {
+				return execDir, nil
+			}
+			// Fallback to user documents
+			homeDir, err := os.UserHomeDir()
+			if err == nil {
+				trustDropDir := filepath.Join(homeDir, "Documents", "TrustDrop")
+				if err := os.MkdirAll(trustDropDir, 0755); err == nil {
+					return trustDropDir, nil
+				}
+			}
+			return execDir, nil
+		default:
+			return filepath.Dir(execPath), nil
+		}
+	}
+
+	// For development, use current directory
+	return os.Getwd()
 }

@@ -14,11 +14,10 @@ func main() {
 	// Set up better logging
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	// FIXED: Improved working directory handling for macOS .app bundles
-	if runtime.GOOS == "darwin" {
-		if err := setupMacOSWorkingDirectory(); err != nil {
-			log.Printf("Warning: Could not set proper working directory: %v", err)
-		}
+	// FIXED: Enhanced working directory setup for all platforms
+	if err := setupWorkingDirectory(); err != nil {
+		log.Printf("Warning: Could not set proper working directory: %v", err)
+		// Continue anyway - use current directory as fallback
 	}
 
 	// Only show console output in debug mode
@@ -61,58 +60,172 @@ func main() {
 	app.Run()
 }
 
-// FIXED: Improved macOS working directory setup
-func setupMacOSWorkingDirectory() error {
+// FIXED: Cross-platform working directory setup
+func setupWorkingDirectory() error {
 	execPath, err := os.Executable()
 	if err != nil {
 		return err
 	}
 
+	var targetDir string
+
+	switch runtime.GOOS {
+	case "darwin":
+		targetDir, err = setupMacOSWorkingDirectory(execPath)
+	case "windows":
+		targetDir, err = setupWindowsWorkingDirectory(execPath)
+	case "linux":
+		targetDir, err = setupLinuxWorkingDirectory(execPath)
+	default:
+		// Fallback: use directory containing executable
+		targetDir = filepath.Dir(execPath)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	// Change to target directory
+	if err := os.Chdir(targetDir); err != nil {
+		return err
+	}
+
+	if os.Getenv("DEBUG") != "" {
+		fmt.Printf("Set working directory to: %s\n", targetDir)
+	}
+
+	return nil
+}
+
+// FIXED: Enhanced macOS working directory setup
+func setupMacOSWorkingDirectory(execPath string) (string, error) {
 	// Check if we're running from a .app bundle
 	if filepath.Base(filepath.Dir(execPath)) == "MacOS" {
 		// We're in .app/Contents/MacOS/
 		contentsDir := filepath.Dir(execPath)
 		appDir := filepath.Dir(contentsDir)
-		
-		// Try to use the directory containing the .app bundle
 		parentDir := filepath.Dir(appDir)
 		
-		// Verify the parent directory is writable
-		testFile := filepath.Join(parentDir, ".trustdrop_test")
-		if f, err := os.Create(testFile); err == nil {
-			f.Close()
-			os.Remove(testFile)
-			
-			// Change to the parent directory (where .app is located)
-			if err := os.Chdir(parentDir); err == nil {
-				if os.Getenv("DEBUG") != "" {
-					fmt.Printf("Set working directory to: %s\n", parentDir)
+		// Strategy 1: Try to use the directory containing the .app bundle
+		if isWritableDirectory(parentDir) {
+			return parentDir, nil
+		}
+		
+		// Strategy 2: Try the .app bundle's Contents directory
+		if isWritableDirectory(contentsDir) {
+			return contentsDir, nil
+		}
+		
+		// Strategy 3: Use user's Documents directory for medical apps
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			documentsDir := filepath.Join(homeDir, "Documents", "TrustDrop")
+			if err := os.MkdirAll(documentsDir, 0755); err == nil {
+				if isWritableDirectory(documentsDir) {
+					return documentsDir, nil
 				}
-				return nil
 			}
 		}
 		
-		// Fallback: Use user's home directory
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return err
+		// Strategy 4: Fallback to user's home directory
+		if err == nil {
+			trustDropDir := filepath.Join(homeDir, "TrustDrop")
+			if err := os.MkdirAll(trustDropDir, 0755); err == nil {
+				if isWritableDirectory(trustDropDir) {
+					return trustDropDir, nil
+				}
+			}
 		}
 		
-		trustDropDir := filepath.Join(homeDir, "TrustDrop")
-		if err := os.MkdirAll(trustDropDir, 0755); err != nil {
-			return err
-		}
-		
-		if err := os.Chdir(trustDropDir); err != nil {
-			return err
-		}
-		
-		if os.Getenv("DEBUG") != "" {
-			fmt.Printf("Set working directory to: %s\n", trustDropDir)
+		// Strategy 5: Last resort - use temp directory
+		tempDir := filepath.Join(os.TempDir(), "TrustDrop")
+		if err := os.MkdirAll(tempDir, 0755); err == nil {
+			return tempDir, nil
 		}
 	}
 	
-	return nil
+	// If not in app bundle, use directory containing executable
+	return filepath.Dir(execPath), nil
+}
+
+// FIXED: Windows working directory setup
+func setupWindowsWorkingDirectory(execPath string) (string, error) {
+	execDir := filepath.Dir(execPath)
+	
+	// Strategy 1: Try directory containing .exe
+	if isWritableDirectory(execDir) {
+		return execDir, nil
+	}
+	
+	// Strategy 2: Use user's Documents directory
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		documentsDir := filepath.Join(homeDir, "Documents", "TrustDrop")
+		if err := os.MkdirAll(documentsDir, 0755); err == nil {
+			if isWritableDirectory(documentsDir) {
+				return documentsDir, nil
+			}
+		}
+	}
+	
+	// Strategy 3: Use AppData directory
+	if err == nil {
+		appDataDir := filepath.Join(homeDir, "AppData", "Local", "TrustDrop")
+		if err := os.MkdirAll(appDataDir, 0755); err == nil {
+			if isWritableDirectory(appDataDir) {
+				return appDataDir, nil
+			}
+		}
+	}
+	
+	// Fallback: use temp directory
+	tempDir := filepath.Join(os.TempDir(), "TrustDrop")
+	if err := os.MkdirAll(tempDir, 0755); err == nil {
+		return tempDir, nil
+	}
+	
+	return execDir, nil
+}
+
+// FIXED: Linux working directory setup
+func setupLinuxWorkingDirectory(execPath string) (string, error) {
+	execDir := filepath.Dir(execPath)
+	
+	// Strategy 1: Try directory containing executable
+	if isWritableDirectory(execDir) {
+		return execDir, nil
+	}
+	
+	// Strategy 2: Use user's home directory
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		trustDropDir := filepath.Join(homeDir, ".trustdrop")
+		if err := os.MkdirAll(trustDropDir, 0755); err == nil {
+			if isWritableDirectory(trustDropDir) {
+				return trustDropDir, nil
+			}
+		}
+	}
+	
+	// Strategy 3: Use /tmp
+	tempDir := filepath.Join("/tmp", "trustdrop")
+	if err := os.MkdirAll(tempDir, 0755); err == nil {
+		return tempDir, nil
+	}
+	
+	return execDir, nil
+}
+
+// FIXED: Helper to test if directory is writable
+func isWritableDirectory(dir string) bool {
+	testFile := filepath.Join(dir, ".trustdrop_write_test")
+	f, err := os.Create(testFile)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	os.Remove(testFile)
+	return true
 }
 
 func getCurrentDir() string {
