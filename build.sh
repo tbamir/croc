@@ -106,6 +106,33 @@ cat > "${APP_NAME}.app/Contents/Info.plist" << EOF
 </plist>
 EOF
 
+# Prepare Windows icon resources (for cross-compilation)
+echo -e "${YELLOW}Preparing Windows icon resources...${NC}"
+if [ -f "image.png" ]; then
+    if command -v magick >/dev/null 2>&1; then
+        # Generate ICO file for Windows
+        magick image.png -resize 16x16 temp16.png
+        magick image.png -resize 32x32 temp32.png  
+        magick image.png -resize 48x48 temp48.png
+        magick image.png -resize 256x256 temp256.png
+        magick temp16.png temp32.png temp48.png temp256.png icon.ico
+        rm temp16.png temp32.png temp48.png temp256.png
+        echo -e "${GREEN}Windows icon (icon.ico) created${NC}"
+        
+        # Also prepare the rsrc tool for Windows builds
+        if [ ! -f "$HOME/go/bin/rsrc" ]; then
+            echo -e "${YELLOW}Installing rsrc tool for Windows builds...${NC}"
+            go install github.com/akavel/rsrc@latest
+        fi
+        echo -e "${GREEN}Windows build tools ready${NC}"
+    else
+        echo -e "${YELLOW}ImageMagick not found, skipping Windows icon generation${NC}"
+        echo -e "${YELLOW}Install with: brew install imagemagick${NC}"
+    fi
+else
+    echo -e "${YELLOW}image.png not found, skipping Windows icon generation${NC}"
+fi
+
 echo -e "${GREEN}Build successful!${NC}"
 
 # Get file size
