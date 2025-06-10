@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -271,8 +272,26 @@ func (btm *BulletproofTransferManager) ReceiveFiles(transferCode string) (*Trans
 		return nil, fmt.Errorf("failed to receive files: %w", err)
 	}
 
-	// Process received data with metadata
-	receivedFiles, totalBytes, err := btm.processReceivedData(data, transferCode, &metadata)
+	// Extract original filename from the transport if available
+	originalFilename := ""
+	if btm.lastTransferMeta != nil && btm.lastTransferMeta.FileName != "" {
+		originalFilename = btm.lastTransferMeta.FileName
+
+		// Clean up temp filename patterns from croc
+		if strings.Contains(originalFilename, "croc_send_") && strings.HasSuffix(originalFilename, ".tmp") {
+			// This is a croc temporary file, we need to extract the real name
+			// For now, create a better default name
+			originalFilename = fmt.Sprintf("received_file_%d", time.Now().Unix())
+		}
+	}
+
+	// Process received data with enhanced metadata
+	enhancedMetadata := &transport.TransferMetadata{
+		TransferID: transferCode,
+		FileName:   originalFilename,
+	}
+
+	receivedFiles, totalBytes, err := btm.processReceivedData(data, transferCode, enhancedMetadata)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process received data: %w", err)
 	}
@@ -283,7 +302,12 @@ func (btm *BulletproofTransferManager) ReceiveFiles(transferCode string) (*Trans
 	result.Duration = time.Since(startTime)
 	result.IntegrityVerified = btm.integrityChecks
 
-	btm.updateStatus(fmt.Sprintf("Receive completed successfully! %d files (%s) in %v",
+	// Record in blockchain if enabled
+	if err := btm.recordTransferInBlockchain(result, transferCode); err != nil {
+		btm.updateStatus(fmt.Sprintf("Warning: Failed to record transfer in blockchain: %v", err))
+	}
+
+	btm.updateStatus(fmt.Sprintf("Transfer completed successfully! %d files (%s) in %v",
 		len(result.TransferredFiles), btm.formatBytes(result.TotalBytes), result.Duration))
 
 	return result, nil
@@ -388,23 +412,47 @@ func (btm *BulletproofTransferManager) processReceivedData(encryptedData []byte,
 		// It's a file manifest (multiple files or folder)
 		return btm.processFileManifest(manifest, receivedDir, transferCode)
 	} else {
-		// It's a single file - preserve original filename
-		filename := fmt.Sprintf("received_file_%d", time.Now().Unix())
-
-		// Use filename from metadata if available
-		if metadata != nil && metadata.FileName != "" {
-			filename = metadata.FileName
-		} else if btm.transferID != "" {
-			// Fallback: use transfer ID
-			filename = fmt.Sprintf("file_%s", btm.transferID)
+		// Try to parse as single file payload with embedded filename
+		var filePayload struct {
+			OriginalName string `json:"original_name"`
+			Data         []byte `json:"data"`
 		}
 
-		filePath := filepath.Join(receivedDir, filename)
-		if err := os.WriteFile(filePath, decryptedData, 0644); err != nil {
-			return nil, 0, fmt.Errorf("failed to write received file: %w", err)
-		}
+		if err := json.Unmarshal(decryptedData, &filePayload); err == nil && filePayload.OriginalName != "" {
+			// It's a single file with embedded filename
+			filename := filePayload.OriginalName
 
-		return []string{filePath}, int64(len(decryptedData)), nil
+			// Sanitize the filename for safety
+			filename = filepath.Base(filename) // Remove any path components
+			if filename == "" || filename == "." || filename == ".." {
+				filename = fmt.Sprintf("received_file_%d", time.Now().Unix())
+			}
+
+			filePath := filepath.Join(receivedDir, filename)
+			if err := os.WriteFile(filePath, filePayload.Data, 0644); err != nil {
+				return nil, 0, fmt.Errorf("failed to write received file: %w", err)
+			}
+
+			return []string{filePath}, int64(len(filePayload.Data)), nil
+		} else {
+			// It's raw file data (legacy format or direct data)
+			filename := fmt.Sprintf("received_file_%d", time.Now().Unix())
+
+			// Use filename from metadata if available
+			if metadata != nil && metadata.FileName != "" {
+				filename = metadata.FileName
+			} else if btm.transferID != "" {
+				// Fallback: use transfer ID
+				filename = fmt.Sprintf("file_%s", btm.transferID)
+			}
+
+			filePath := filepath.Join(receivedDir, filename)
+			if err := os.WriteFile(filePath, decryptedData, 0644); err != nil {
+				return nil, 0, fmt.Errorf("failed to write received file: %w", err)
+			}
+
+			return []string{filePath}, int64(len(decryptedData)), nil
+		}
 	}
 }
 
@@ -654,12 +702,27 @@ func (btm *BulletproofTransferManager) processSingleFile(filePath, transferCode 
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Calculate hash
+	// Create a file payload that includes the original filename
+	filePayload := struct {
+		OriginalName string `json:"original_name"`
+		Data         []byte `json:"data"`
+	}{
+		OriginalName: filepath.Base(filePath),
+		Data:         data,
+	}
+
+	// Serialize the payload
+	payloadData, err := json.Marshal(filePayload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize file payload: %w", err)
+	}
+
+	// Calculate hash of original data (not the payload)
 	hash := sha256.Sum256(data)
 	hashString := hex.EncodeToString(hash[:])
 
-	// Encrypt with best mode
-	encryptedData, _, err := btm.advancedSecurity.EncryptWithBestMode(data, []byte(transferCode))
+	// Encrypt the payload with best mode
+	encryptedData, _, err := btm.advancedSecurity.EncryptWithBestMode(payloadData, []byte(transferCode))
 	if err != nil {
 		return nil, fmt.Errorf("encryption failed: %w", err)
 	}
@@ -668,7 +731,7 @@ func (btm *BulletproofTransferManager) processSingleFile(filePath, transferCode 
 	metadata := transport.TransferMetadata{
 		TransferID: transferCode,
 		FileName:   filepath.Base(filePath),
-		FileSize:   int64(len(data)),
+		FileSize:   int64(len(payloadData)),
 		Checksum:   hashString,
 	}
 

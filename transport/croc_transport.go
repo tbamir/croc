@@ -78,11 +78,18 @@ func (t *EnhancedCrocTransport) Receive(metadata TransferMetadata) ([]byte, erro
 	// Try each relay with progressive timeouts
 	timeouts := []time.Duration{30 * time.Second, 2 * time.Minute, 5 * time.Minute}
 
+	var receivedFilename string
 	for _, timeout := range timeouts {
 		for _, relay := range t.relays {
 			if err := t.attemptReceiveWithRelay(metadata.TransferID, tempDir, relay, timeout); err == nil {
-				// Read the received file
-				return t.readReceivedFile(tempDir, metadata.FileName)
+				// Get the received filename and data
+				data, filename, err := t.readReceivedFileWithName(tempDir)
+				if err == nil {
+					receivedFilename = filename
+					// Update the metadata with the actual received filename
+					metadata.FileName = receivedFilename
+					return data, nil
+				}
 			}
 		}
 	}
@@ -280,6 +287,40 @@ func (t *EnhancedCrocTransport) readReceivedFile(tempDir, expectedFileName strin
 	}
 
 	return data, nil
+}
+
+func (t *EnhancedCrocTransport) readReceivedFileWithName(tempDir string) ([]byte, string, error) {
+	// Try to find the received file
+	var receivedFile string
+	var receivedFilename string
+
+	err := filepath.Walk(tempDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			receivedFile = path
+			receivedFilename = info.Name()
+			return filepath.SkipDir // Found a file, stop walking
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to find received file: %w", err)
+	}
+
+	if receivedFile == "" {
+		return nil, "", fmt.Errorf("no file received")
+	}
+
+	// Read the file
+	data, err := ioutil.ReadFile(receivedFile)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read received file: %w", err)
+	}
+
+	return data, receivedFilename, nil
 }
 
 func (t *EnhancedCrocTransport) testRelayConnectivity(ctx context.Context, relay string) bool {
