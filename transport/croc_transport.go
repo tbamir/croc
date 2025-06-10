@@ -147,7 +147,7 @@ func (t *EnhancedCrocTransport) attemptSendWithRelay(filepath, transferCode, rel
 		relayPort = "9009"
 	}
 
-	// Configure croc options (similar to test4)
+	// Configure croc options (using the correct API)
 	options := croc.Options{
 		IsSender:       true,
 		SharedSecret:   transferCode,
@@ -174,11 +174,19 @@ func (t *EnhancedCrocTransport) attemptSendWithRelay(filepath, transferCode, rel
 	// Store client for potential cleanup
 	t.client = client
 
-	// Send file using croc library
-	// Note: The croc library may not have a direct Send method for single files
-	// We may need to use the internal mechanisms or fallback to subprocess
-	// For now, let's try the subprocess approach as a reliable fallback
-	return t.attemptSendWithSubprocess(filepath, transferCode, relay, timeout)
+	// Get file info for the temporary file using the croc library's method
+	filesInfo, emptyFolders, totalFolders, err := croc.GetFilesInfo([]string{filepath}, false, false, []string{})
+	if err != nil {
+		return fmt.Errorf("failed to get file info: %w", err)
+	}
+
+	// Use the correct croc library Send method
+	err = client.Send(filesInfo, emptyFolders, totalFolders)
+	if err != nil {
+		return fmt.Errorf("croc send failed: %w", err)
+	}
+
+	return nil
 }
 
 func (t *EnhancedCrocTransport) attemptReceiveWithRelay(transferCode, targetDir, relay string, timeout time.Duration) error {
@@ -207,7 +215,7 @@ func (t *EnhancedCrocTransport) attemptReceiveWithRelay(transferCode, targetDir,
 		HashAlgorithm:  "xxhash",
 	}
 
-	// Create croc client
+	// Create croc client for receiving
 	client, err := croc.New(options)
 	if err != nil {
 		return fmt.Errorf("failed to create croc client: %w", err)
@@ -216,20 +224,24 @@ func (t *EnhancedCrocTransport) attemptReceiveWithRelay(transferCode, targetDir,
 	// Store client for potential cleanup
 	t.client = client
 
-	// Receive using croc library - similar approach as subprocess for now
-	return t.attemptReceiveWithSubprocess(transferCode, targetDir, relay, timeout)
-}
+	// Change to target directory for receiving
+	oldDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+	defer os.Chdir(oldDir)
 
-// Subprocess fallback methods (these work reliably)
-func (t *EnhancedCrocTransport) attemptSendWithSubprocess(filepath, transferCode, relay string, timeout time.Duration) error {
-	// This is a fallback if the library approach doesn't work
-	// We can implement subprocess calls here if needed
-	return fmt.Errorf("croc library integration in progress, subprocess fallback not implemented")
-}
+	if err := os.Chdir(targetDir); err != nil {
+		return fmt.Errorf("failed to change to target directory: %w", err)
+	}
 
-func (t *EnhancedCrocTransport) attemptReceiveWithSubprocess(transferCode, targetDir, relay string, timeout time.Duration) error {
-	// This is a fallback if the library approach doesn't work
-	return fmt.Errorf("croc library integration in progress, subprocess fallback not implemented")
+	// Use the correct croc library Receive method
+	err = client.Receive()
+	if err != nil {
+		return fmt.Errorf("croc receive failed: %w", err)
+	}
+
+	return nil
 }
 
 func (t *EnhancedCrocTransport) readReceivedFile(tempDir, expectedFileName string) ([]byte, error) {

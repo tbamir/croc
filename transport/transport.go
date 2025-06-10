@@ -73,10 +73,8 @@ func NewMultiTransportManager(config TransportConfig) (*MultiTransportManager, e
 		successHistory:   make(map[string]int),
 	}
 
-	// Skip transport initialization for now - just create an empty manager
+	// Set a basic network profile without complex testing
 	fmt.Printf("Creating minimal transport manager (skipping complex initialization)...\n")
-
-	// Set a basic network profile without testing
 	mtm.networkProfile = NetworkProfile{
 		IsRestrictive:      false,
 		AvailablePorts:     []int{9009, 443, 80},
@@ -86,8 +84,34 @@ func NewMultiTransportManager(config TransportConfig) (*MultiTransportManager, e
 		PreferredTransport: "croc",
 	}
 
+	// Initialize at least the croc transport for basic functionality
+	fmt.Printf("Initializing core transports...\n")
+	if err := mtm.initializeBasicTransports(); err != nil {
+		return nil, fmt.Errorf("failed to initialize basic transports: %w", err)
+	}
+
 	fmt.Printf("Transport manager created successfully\n")
 	return mtm, nil
+}
+
+// initializeBasicTransports sets up essential transports without complex network testing
+func (mtm *MultiTransportManager) initializeBasicTransports() error {
+	// Initialize Croc transport (highest priority for compatibility)
+	fmt.Printf("Setting up croc transport...\n")
+	crocTransport := NewCrocTransport(100)
+	if err := crocTransport.Setup(mtm.config); err == nil {
+		mtm.transports = append(mtm.transports, crocTransport)
+		fmt.Printf("✅ Croc transport initialized\n")
+	} else {
+		fmt.Printf("⚠️ Failed to setup croc transport: %v\n", err)
+	}
+
+	if len(mtm.transports) == 0 {
+		return fmt.Errorf("no transports available")
+	}
+
+	fmt.Printf("Initialized %d transports\n", len(mtm.transports))
+	return nil
 }
 
 // initializeTransports sets up all available transport methods
