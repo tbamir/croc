@@ -44,9 +44,9 @@ type Blockchain struct {
 }
 
 // NewBlockchain creates a new blockchain or loads existing one
-func NewBlockchain() (*Blockchain, error) {
-	// Create blockchain directory if it doesn't exist with secure permissions
-	blockchainDir := "blockchain_data"
+func NewBlockchain(dataDir string) (*Blockchain, error) {
+	// Use provided data directory instead of current working directory
+	blockchainDir := filepath.Join(dataDir, "blockchain_data")
 	if err := os.MkdirAll(blockchainDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create blockchain directory: %w", err)
 	}

@@ -104,13 +104,13 @@ func NewBulletproofTransferManager(targetDataDir string) (*BulletproofTransferMa
 	advancedSecurity := security.NewAdvancedSecurity()
 
 	fmt.Printf("Creating blockchain...\n")
-	blockchain, err := blockchain.NewBlockchain()
+	blockchain, err := blockchain.NewBlockchain(targetDataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize blockchain: %w", err)
 	}
 
 	fmt.Printf("Creating logger...\n")
-	logger, err := logging.NewLogger("bulletproof_transfers.log")
+	logger, err := logging.NewLogger(targetDataDir, "bulletproof_transfers.log")
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize logger: %w", err)
 	}

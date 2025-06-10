@@ -29,9 +29,9 @@ type Logger struct {
 	blockchain *blockchain.Blockchain
 }
 
-func NewLogger(filename ...string) (*Logger, error) {
-	// Create logs directory if it doesn't exist
-	logsDir := "logs"
+func NewLogger(dataDir string, filename ...string) (*Logger, error) {
+	// Create logs directory in the provided data directory
+	logsDir := filepath.Join(dataDir, "logs")
 	if err := os.MkdirAll(logsDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create logs directory: %w", err)
 	}
@@ -41,8 +41,8 @@ func NewLogger(filename ...string) (*Logger, error) {
 		logFile = filepath.Join(logsDir, filename[0])
 	}
 
-	// Initialize blockchain
-	bc, err := blockchain.NewBlockchain()
+	// Initialize blockchain with data directory
+	bc, err := blockchain.NewBlockchain(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize blockchain: %w", err)
 	}
