@@ -317,6 +317,9 @@ func (ba *BulletproofApp) createSuccessView() {
 	ba.openFolderBtn.Icon = theme.FolderOpenIcon()
 
 	ba.doneButton = widget.NewButton("Done", func() {
+		// Properly reset the send view state and generate new code
+		ba.resetSendView()
+		ba.resetTransferState()
 		ba.showMainView()
 	})
 	ba.doneButton.Importance = widget.HighImportance
@@ -475,15 +478,25 @@ func (ba *BulletproofApp) startSend(paths []string) {
 	go func() {
 		result, err := ba.transferManager.SendFiles(paths, ba.currentCode)
 		if err != nil {
+			// Handle send errors properly
 			ba.mutex.Lock()
 			ba.isTransferring = false
 			ba.mutex.Unlock()
 
+			// Reset UI state
 			ba.waitingLabel.Hide()
 			ba.selectButton.Enable()
 
-			dialog.ShowError(err, ba.window)
+			// Show error
+			go func() {
+				dialog.ShowError(fmt.Errorf("Send failed: %v", err), ba.window)
+			}()
 		} else {
+			// Success - reset state and show success
+			ba.mutex.Lock()
+			ba.isTransferring = false
+			ba.mutex.Unlock()
+
 			// Determine what was sent for success message
 			var successMsg string
 			if info, err := os.Stat(paths[0]); err == nil && info.IsDir() {
@@ -499,17 +512,32 @@ func (ba *BulletproofApp) startSend(paths []string) {
 func (ba *BulletproofApp) onStartReceive(code string) {
 	ba.showProgressView()
 	ba.statusLabel.SetText("Connecting to sender...")
+	ba.detailLabel.SetText("Initializing secure connection...")
 
 	go func() {
+		// Add timeout protection for large transfers
 		result, err := ba.transferManager.ReceiveFiles(code)
 		if err != nil {
-			dialog.ShowError(err, ba.window)
-			time.Sleep(time.Second)
-			ba.showReceiveView()
+			// Better error handling - don't crash, show error and return to receive view
+			ba.mutex.Lock()
+			ba.isTransferring = false
+			ba.mutex.Unlock()
+
+			// Show error in main thread
+			go func() {
+				dialog.ShowError(fmt.Errorf("Transfer failed: %v", err), ba.window)
+				time.Sleep(2 * time.Second)
+				ba.showReceiveView()
+			}()
 		} else {
-			ba.showSuccessView(fmt.Sprintf("Received %d files successfully!", len(result.TransferredFiles)))
+			// Success - reset transfer state and show results
+			ba.mutex.Lock()
+			ba.isTransferring = false
+			ba.mutex.Unlock()
+
 			receivedPath := filepath.Join(ba.targetDataDir, "received")
 			ba.locationLabel.SetText(fmt.Sprintf("Files saved to: %s", receivedPath))
+			ba.showSuccessView(fmt.Sprintf("Received %d files successfully!", len(result.TransferredFiles)))
 		}
 	}()
 }

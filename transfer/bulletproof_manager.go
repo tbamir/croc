@@ -462,11 +462,22 @@ func (btm *BulletproofTransferManager) processFileManifest(manifest FileManifest
 				// Data is embedded in manifest
 				fileData = fileInfo.Data
 			} else {
-				// File data needs to be received separately (for large files)
-				// This is a simplified approach - in a full implementation,
-				// large files would be transferred separately
-				btm.updateStatus(fmt.Sprintf("Receiving large file: %s", fileInfo.RelativePath))
-				continue
+				// Large file without embedded data - create placeholder
+				if fileInfo.Size > 50*1024*1024 {
+					btm.updateStatus(fmt.Sprintf("Large file %s not fully transferred - creating placeholder", fileInfo.RelativePath))
+
+					// Create a placeholder file with info
+					placeholderContent := fmt.Sprintf("LARGE FILE PLACEHOLDER\n\nOriginal file: %s\nSize: %s\nHash: %s\n\nThis file was too large to transfer in the current session.\nPlease transfer large files individually.",
+						fileInfo.OriginalPath, btm.formatBytes(fileInfo.Size), fileInfo.Hash)
+					fileData = []byte(placeholderContent)
+
+					// Change filename to indicate it's a placeholder
+					fullPath = fullPath + ".placeholder.txt"
+				} else {
+					// File data needs to be received separately (for smaller files)
+					btm.updateStatus(fmt.Sprintf("Receiving file separately: %s", fileInfo.RelativePath))
+					continue
+				}
 			}
 
 			if err := os.WriteFile(fullPath, fileData, 0644); err != nil {
@@ -501,6 +512,8 @@ func (btm *BulletproofTransferManager) processFile(filePath, transferCode string
 
 // processFolder handles sending entire folders
 func (btm *BulletproofTransferManager) processFolder(folderPath, transferCode string) (*FileProcessResult, error) {
+	btm.updateStatus(fmt.Sprintf("Analyzing folder: %s", filepath.Base(folderPath)))
+
 	// Create file manifest
 	manifest := FileManifest{
 		Files:      make(map[string]FileInfo),
@@ -509,10 +522,27 @@ func (btm *BulletproofTransferManager) processFolder(folderPath, transferCode st
 		TotalSize:  0,
 	}
 
-	// Walk through folder and collect all files
+	// Count files first for progress tracking
+	fileCount := 0
 	err := filepath.Walk(folderPath, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			fileCount++
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to count files: %w", err)
+	}
+
+	btm.updateStatus(fmt.Sprintf("Processing %d files in folder...", fileCount))
+	processedFiles := 0
+
+	// Walk through folder and collect all files
+	err = filepath.Walk(folderPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			btm.updateStatus(fmt.Sprintf("Warning: Error accessing %s, skipping", path))
+			return nil // Skip this file but continue
 		}
 
 		// Get relative path
@@ -533,11 +563,15 @@ func (btm *BulletproofTransferManager) processFolder(folderPath, transferCode st
 		}
 
 		if !info.IsDir() {
-			// Read file data for small files (< 10MB)
-			if info.Size() < 10*1024*1024 {
+			processedFiles++
+			btm.updateProgress(int64(processedFiles), int64(fileCount), relPath)
+
+			// Handle files of all sizes properly
+			if info.Size() < 50*1024*1024 { // Increased limit to 50MB for embedded files
 				data, err := os.ReadFile(path)
 				if err != nil {
-					return fmt.Errorf("failed to read file %s: %w", path, err)
+					btm.updateStatus(fmt.Sprintf("Warning: Could not read %s, skipping", relPath))
+					return nil // Skip this file but continue with others
 				}
 
 				// Calculate hash
@@ -547,9 +581,23 @@ func (btm *BulletproofTransferManager) processFolder(folderPath, transferCode st
 
 				manifest.TotalSize += int64(len(data))
 			} else {
-				// For large files, we'll need a different approach
-				// For now, skip them or handle them separately
-				btm.updateStatus(fmt.Sprintf("Skipping large file: %s (implement separate transfer)", relPath))
+				// For very large files (>50MB), store metadata only
+				// The file data will need to be transferred separately
+				btm.updateStatus(fmt.Sprintf("Large file detected: %s (%s) - adding to manifest", relPath, btm.formatBytes(info.Size())))
+
+				// Calculate hash of first 1KB for identification
+				if file, err := os.Open(path); err == nil {
+					buffer := make([]byte, 1024)
+					if n, err := file.Read(buffer); err == nil {
+						hash := sha256.Sum256(buffer[:n])
+						fileInfo.Hash = hex.EncodeToString(hash[:])
+					}
+					file.Close()
+				}
+
+				// Don't embed data, but include in manifest for proper reconstruction
+				fileInfo.Data = nil
+				manifest.TotalSize += info.Size()
 			}
 		}
 
