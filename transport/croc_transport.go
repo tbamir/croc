@@ -93,8 +93,14 @@ func (t *EnhancedCrocTransport) Receive(metadata TransferMetadata) ([]byte, erro
 // IsAvailable checks if the croc transport is available
 func (t *EnhancedCrocTransport) IsAvailable(ctx context.Context) bool {
 	// Test connectivity to at least one relay server
-	for _, relay := range t.relays[:3] { // Test first 3 relays
-		if t.testRelayConnectivity(ctx, relay) {
+	// Safely determine how many relays to test (max 3, but don't exceed actual length)
+	numRelaysToTest := len(t.relays)
+	if numRelaysToTest > 3 {
+		numRelaysToTest = 3
+	}
+
+	for i := 0; i < numRelaysToTest; i++ {
+		if t.testRelayConnectivity(ctx, t.relays[i]) {
 			return true
 		}
 	}
