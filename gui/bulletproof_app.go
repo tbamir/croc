@@ -18,6 +18,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"trustdrop-bulletproof/src/utils"
 	"trustdrop-bulletproof/transfer"
 	"trustdrop-bulletproof/transport"
 )
@@ -598,10 +599,5 @@ func (ba *BulletproofApp) setupCallbacks() {
 }
 
 func generateTransferCode() string {
-	// Generate a simple 3-word code for now
-	words := []string{"alpha", "beta", "gamma", "delta", "echo", "foxtrot", "golf", "hotel"}
-	return fmt.Sprintf("%s-%s-%s",
-		words[time.Now().Second()%len(words)],
-		words[(time.Now().Second()+1)%len(words)],
-		words[(time.Now().Second()+2)%len(words)])
+	return utils.GetRandomName()
 }
