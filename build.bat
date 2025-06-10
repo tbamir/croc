@@ -1,147 +1,115 @@
 @echo off
-REM TrustDrop Build Script for Windows
-REM This script builds the TrustDrop application
+REM TrustDrop Bulletproof Build Script for Windows
+REM Builds for Windows, Mac, and Linux
 
-echo Building TrustDrop for Windows...
+setlocal enabledelayedexpansion
 
-REM Set build directory
+echo 🚀 TrustDrop Bulletproof Edition - Windows Build Script
+echo =========================================================
+
+REM Get version info
+for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /format:list ^| find "="') do set datetime=%%I
+set VERSION=%datetime:~0,8%_%datetime:~8,6%
 set BUILD_DIR=build
-if not exist %BUILD_DIR% mkdir %BUILD_DIR%
+set APP_NAME=trustdrop-bulletproof
 
-REM Clean up existing build
-if exist %BUILD_DIR%\TrustDrop.exe del %BUILD_DIR%\TrustDrop.exe
-if exist %BUILD_DIR%\TrustDrop.ico del %BUILD_DIR%\TrustDrop.ico
-if exist app_icon.rc del app_icon.rc
-if exist app_icon.syso del app_icon.syso
+echo Version: %VERSION%
+echo Building: %APP_NAME%
 
-REM Check for image.png and attempt icon conversion
-if exist image.png (
-    echo Converting image.png to .ico format...
-    
-    REM Check if ImageMagick is available
-    where magick >nul 2>nul
-    if errorlevel 1 (
-        echo WARNING: ImageMagick not found. Building without custom icon.
-        echo To add custom icon support:
-        echo   Install ImageMagick: winget install ImageMagick.ImageMagick
-        echo   Or manually convert image.png to TrustDrop.ico and place in build folder
-        set ICON_FLAGS=-ldflags="-s -w -H=windowsgui"
-    ) else (
-        echo Creating Windows icon sizes...
-        magick image.png -resize 256x256 temp_256.png
-        magick image.png -resize 128x128 temp_128.png
-        magick image.png -resize 64x64 temp_64.png
-        magick image.png -resize 48x48 temp_48.png
-        magick image.png -resize 32x32 temp_32.png
-        magick image.png -resize 16x16 temp_16.png
-        
-        echo Creating .ico file...
-        magick temp_16.png temp_32.png temp_48.png temp_64.png temp_128.png temp_256.png %BUILD_DIR%\TrustDrop.ico
-        
-        REM Clean up temp files
-        del temp_*.png
-        
-        echo SUCCESS: Icon created at %BUILD_DIR%\TrustDrop.ico
-        
-        REM Create resource file for embedding icon
-        echo Creating resource file...
-        echo IDI_ICON1 ICON "%BUILD_DIR%\TrustDrop.ico" > app_icon.rc
-        
-        REM Check if windres is available
-        where windres >nul 2>nul
-        if errorlevel 1 (
-            echo WARNING: windres not found. Icon will not be embedded in .exe
-            echo To embed icons, install TDM-GCC or MinGW-w64
-            set ICON_FLAGS=-ldflags="-s -w -H=windowsgui"
-        ) else (
-            echo Compiling resource file...
-            windres -i app_icon.rc -o app_icon.syso
-            if errorlevel 1 (
-                echo WARNING: Resource compilation failed
-                set ICON_FLAGS=-ldflags="-s -w -H=windowsgui"
-            ) else (
-                echo SUCCESS: Icon resource compiled
-                set ICON_FLAGS=-ldflags="-s -w -H=windowsgui"
-            )
-        )
-    )
+REM Clean previous builds
+echo 🧹 Cleaning previous builds...
+if exist %BUILD_DIR% rmdir /s /q %BUILD_DIR%
+mkdir %BUILD_DIR%
+
+REM Build for Windows first
+echo 🔨 Building for Windows x64...
+set OUTPUT_NAME=%BUILD_DIR%\%APP_NAME%_windows_x64_%VERSION%.exe
+go build -v -ldflags="-s -w" -o "%OUTPUT_NAME%" .
+
+if %ERRORLEVEL% equ 0 (
+    echo ✅ Windows x64 build successful: %OUTPUT_NAME%
+    for %%A in ("%OUTPUT_NAME%") do echo    📦 Size: %%~zA bytes
 ) else (
-    echo WARNING: image.png not found - .exe will use default icon
-    set ICON_FLAGS=-ldflags="-s -w -H=windowsgui"
+    echo ❌ Windows x64 build failed
+    pause
+    exit /b 1
 )
 
-REM Build flags
-if not defined ICON_FLAGS set ICON_FLAGS=-ldflags="-s -w -H=windowsgui"
+REM Cross-compile for other platforms
+echo 🔨 Cross-compiling for other platforms...
 
-REM Build the main application
-echo Building main application...
-go build -v %ICON_FLAGS% -o %BUILD_DIR%\TrustDrop.exe .
-if errorlevel 1 (
-    echo ERROR: Build failed!
-    goto cleanup
-)
-
-echo SUCCESS: Windows .exe created at %BUILD_DIR%\TrustDrop.exe
-
-REM Build the ledger viewer tool
-echo Building ledger viewer...
-if exist cmd\ledger-viewer (
-    pushd cmd\ledger-viewer
-    go build -v -ldflags="-s -w" -o ..\..\%BUILD_DIR%\ledger-viewer.exe .
-    if errorlevel 1 (
-        echo ERROR: Ledger viewer build failed!
-        popd
-        goto cleanup
-    )
-    popd
-    echo SUCCESS: Ledger viewer created at %BUILD_DIR%\ledger-viewer.exe
+REM macOS Intel
+echo Building for macOS Intel...
+set GOOS=darwin
+set GOARCH=amd64
+set CGO_ENABLED=0
+go build -v -ldflags="-s -w" -o "%BUILD_DIR%\%APP_NAME%_macos_intel_%VERSION%" .
+if %ERRORLEVEL% equ 0 (
+    echo ✅ macOS Intel build successful
 ) else (
-    echo WARNING: Ledger viewer source not found, skipping...
+    echo ❌ macOS Intel build failed
 )
 
-REM Create debug launcher
-echo Creating debug launcher...
-echo @echo off > %BUILD_DIR%\TrustDrop-Debug.bat
-echo set DEBUG=1 >> %BUILD_DIR%\TrustDrop-Debug.bat
-echo start TrustDrop.exe >> %BUILD_DIR%\TrustDrop-Debug.bat
+REM macOS Apple Silicon
+echo Building for macOS Apple Silicon...
+set GOOS=darwin
+set GOARCH=arm64
+set CGO_ENABLED=0
+go build -v -ldflags="-s -w" -o "%BUILD_DIR%\%APP_NAME%_macos_apple_silicon_%VERSION%" .
+if %ERRORLEVEL% equ 0 (
+    echo ✅ macOS Apple Silicon build successful
+) else (
+    echo ❌ macOS Apple Silicon build failed
+)
 
-REM Create README for the build
-echo Creating documentation...
-echo TrustDrop - Secure Medical File Transfer > %BUILD_DIR%\README.txt
-echo. >> %BUILD_DIR%\README.txt
-echo To run TrustDrop: >> %BUILD_DIR%\README.txt
-echo   - Double-click TrustDrop.exe >> %BUILD_DIR%\README.txt
-echo. >> %BUILD_DIR%\README.txt
-echo To view the blockchain ledger: >> %BUILD_DIR%\README.txt
-echo   - Open Command Prompt in this folder >> %BUILD_DIR%\README.txt
-echo   - Run: ledger-viewer.exe -view >> %BUILD_DIR%\README.txt
-echo. >> %BUILD_DIR%\README.txt
-echo For debugging: >> %BUILD_DIR%\README.txt
-echo   - Run TrustDrop-Debug.bat to see console output >> %BUILD_DIR%\README.txt
-echo. >> %BUILD_DIR%\README.txt
-echo For medical deployment: >> %BUILD_DIR%\README.txt
-echo   1. Copy TrustDrop.exe to target computers >> %BUILD_DIR%\README.txt
-echo   2. Allow Windows SmartScreen if prompted >> %BUILD_DIR%\README.txt
-echo   3. Double-click to run - no installation needed >> %BUILD_DIR%\README.txt
+REM Linux x64
+echo Building for Linux x64...
+set GOOS=linux
+set GOARCH=amd64
+set CGO_ENABLED=0
+go build -v -ldflags="-s -w" -o "%BUILD_DIR%\%APP_NAME%_linux_x64_%VERSION%" .
+if %ERRORLEVEL% equ 0 (
+    echo ✅ Linux x64 build successful
+) else (
+    echo ❌ Linux x64 build failed
+)
+
+REM Linux ARM64
+echo Building for Linux ARM64...
+set GOOS=linux
+set GOARCH=arm64
+set CGO_ENABLED=0
+go build -v -ldflags="-s -w" -o "%BUILD_DIR%\%APP_NAME%_linux_arm64_%VERSION%" .
+if %ERRORLEVEL% equ 0 (
+    echo ✅ Linux ARM64 build successful
+) else (
+    echo ❌ Linux ARM64 build failed
+)
+
+REM Reset environment
+set GOOS=
+set GOARCH=
+set CGO_ENABLED=
 
 echo.
-echo BUILD COMPLETE!
-echo.
-echo Output files:
-echo   Main application: %BUILD_DIR%\TrustDrop.exe
-if exist %BUILD_DIR%\ledger-viewer.exe echo   Ledger viewer: %BUILD_DIR%\ledger-viewer.exe
-echo   Debug launcher: %BUILD_DIR%\TrustDrop-Debug.bat
-if exist %BUILD_DIR%\TrustDrop.ico echo   Icon file: %BUILD_DIR%\TrustDrop.ico
-echo.
-echo Ready for medical deployment!
-echo   - Upload %BUILD_DIR%\TrustDrop.exe to Google Drive
-echo   - Medical staff download and double-click to run
-echo.
-echo TIP: To create an installer, use Inno Setup or NSIS
+echo 🎉 Build Summary
+echo ===============
+echo Built files:
+dir /b %BUILD_DIR%\%APP_NAME%_*
 
-:cleanup
-REM Clean up temporary files
-if exist app_icon.rc del app_icon.rc
-if exist app_icon.syso del app_icon.syso
+echo.
+echo 📋 Installation Instructions:
+echo Windows: Double-click the .exe file
+echo Mac/Linux: chmod +x filename ^&^& ./filename
 
+echo.
+echo 🔧 For testing Windows ↔ Mac transfers:
+echo 1. Run the appropriate binary on each machine
+echo 2. On sender: Choose 'Send Files' and select files/folders
+echo 3. Share the transfer code with receiver
+echo 4. On receiver: Choose 'Receive Files' and enter the code
+
+echo.
+echo ✨ TrustDrop Bulletproof is ready for testing!
+echo.
 pause

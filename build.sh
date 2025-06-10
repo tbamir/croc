@@ -1,211 +1,126 @@
 #!/bin/bash
 
-# TrustDrop Build Script for macOS and Linux
-# Creates production-ready .app bundle with custom icon
+# TrustDrop Bulletproof Build Script
+# Builds for Mac, Linux, and Windows
 
-set -e
+set -e  # Exit on any error
 
-echo "🚀 Building TrustDrop..."
+echo "🚀 TrustDrop Bulletproof Edition - Build Script"
+echo "================================================"
 
-OS=$(uname -s)
-ARCH=$(uname -m)
-APP_NAME="TrustDrop"
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Get version info
+VERSION=$(date +%Y%m%d_%H%M%S)
 BUILD_DIR="build"
-LDFLAGS="-s -w"
+APP_NAME="trustdrop-bulletproof"
 
-mkdir -p "$BUILD_DIR"
+echo -e "${BLUE}Version: ${VERSION}${NC}"
+echo -e "${BLUE}Building: ${APP_NAME}${NC}"
 
-if [ "$OS" == "Darwin" ]; then
-    echo "🍎 Detected macOS - Building .app bundle..."
+# Clean previous builds
+echo -e "${YELLOW}🧹 Cleaning previous builds...${NC}"
+rm -rf ${BUILD_DIR}
+mkdir -p ${BUILD_DIR}
 
-    APP_BUNDLE="$BUILD_DIR/${APP_NAME}.app"
-    MACOS_DIR="$APP_BUNDLE/Contents/MacOS"
-    RESOURCES_DIR="$APP_BUNDLE/Contents/Resources"
-
-    # Clean up any existing app bundle
-    if [ -d "$APP_BUNDLE" ]; then
-        echo "🧹 Cleaning up existing .app bundle..."
-        rm -rf "$APP_BUNDLE"
-    fi
-
-    # Clean up any existing iconset
-    if [ -d "${APP_NAME}.iconset" ]; then
-        echo "🧹 Cleaning up existing iconset..."
-        rm -rf "${APP_NAME}.iconset"
-    fi
-
-    mkdir -p "$MACOS_DIR"
-    mkdir -p "$RESOURCES_DIR"
-
-    echo "🔨 Compiling macOS GUI binary..."
-    go build -v -ldflags "$LDFLAGS" -o "$MACOS_DIR/$APP_NAME" .
-
-    # Convert image.png to .icns if it exists
-    if [ -f "image.png" ]; then
-        echo "🎨 Converting image.png to .icns format..."
-        
-        # Create iconset directory
-        ICONSET_DIR="${APP_NAME}.iconset"
-        mkdir -p "$ICONSET_DIR"
-
-        # Generate all required icon sizes
-        echo "📐 Generating icon sizes..."
-        sips -z 16 16     image.png --out "$ICONSET_DIR/icon_16x16.png" > /dev/null 2>&1
-        sips -z 32 32     image.png --out "$ICONSET_DIR/icon_16x16@2x.png" > /dev/null 2>&1
-        sips -z 32 32     image.png --out "$ICONSET_DIR/icon_32x32.png" > /dev/null 2>&1
-        sips -z 64 64     image.png --out "$ICONSET_DIR/icon_32x32@2x.png" > /dev/null 2>&1
-        sips -z 128 128   image.png --out "$ICONSET_DIR/icon_128x128.png" > /dev/null 2>&1
-        sips -z 256 256   image.png --out "$ICONSET_DIR/icon_128x128@2x.png" > /dev/null 2>&1
-        sips -z 256 256   image.png --out "$ICONSET_DIR/icon_256x256.png" > /dev/null 2>&1
-        sips -z 512 512   image.png --out "$ICONSET_DIR/icon_256x256@2x.png" > /dev/null 2>&1
-        sips -z 512 512   image.png --out "$ICONSET_DIR/icon_512x512.png" > /dev/null 2>&1
-        sips -z 1024 1024 image.png --out "$ICONSET_DIR/icon_512x512@2x.png" > /dev/null 2>&1
-
-        # Convert iconset to icns
-        echo "🔧 Creating .icns file..."
-        iconutil -c icns "$ICONSET_DIR" -o "$RESOURCES_DIR/${APP_NAME}.icns"
-        
-        # Clean up iconset directory
-        rm -rf "$ICONSET_DIR"
-        
-        echo "✅ Icon created: $RESOURCES_DIR/${APP_NAME}.icns"
-        ICON_KEY="<key>CFBundleIconFile</key>\n    <string>${APP_NAME}</string>"
+# Function to build for a specific platform
+build_platform() {
+    local GOOS=$1
+    local GOARCH=$2
+    local PLATFORM_NAME=$3
+    local EXT=$4
+    
+    echo -e "${BLUE}🔨 Building for ${PLATFORM_NAME}...${NC}"
+    
+    OUTPUT_NAME="${BUILD_DIR}/${APP_NAME}_${PLATFORM_NAME}_${VERSION}${EXT}"
+    
+    # Enable CGO only for current platform, disable for cross-compilation
+    if [[ "${GOOS}" == "$(go env GOOS)" && "${GOARCH}" == "$(go env GOARCH)" ]]; then
+        # Native build - keep CGO enabled for full Fyne support
+        env GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=1 go build -v -ldflags="-s -w" -o "${OUTPUT_NAME}" .
     else
-        echo "⚠️  Warning: image.png not found - app will use default icon"
-        ICON_KEY=""
+        # Cross-compilation - disable CGO
+        env GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=0 go build -v -ldflags="-s -w" -o "${OUTPUT_NAME}" .
     fi
-
-    echo "📝 Creating Info.plist..."
-    cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key>
-    <string>${APP_NAME}</string>
-    <key>CFBundleDisplayName</key>
-    <string>${APP_NAME}</string>
-    <key>CFBundleExecutable</key>
-    <string>${APP_NAME}</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.trustdrop.app</string>
-    <key>CFBundleVersion</key>
-    <string>1.0.0</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleSignature</key>
-    <string>????</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>10.13</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>LSUIElement</key>
-    <false/>
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsArbitraryLoads</key>
-        <true/>
-    </dict>
-    <key>NSRequiresAquaSystemAppearance</key>
-    <false/>
-EOF
-
-    # Add icon file reference if icon was created
-    if [ -f "$RESOURCES_DIR/${APP_NAME}.icns" ]; then
-        cat >> "$APP_BUNDLE/Contents/Info.plist" <<EOF
-    <key>CFBundleIconFile</key>
-    <string>${APP_NAME}</string>
-EOF
-    fi
-
-    # Close the plist
-    cat >> "$APP_BUNDLE/Contents/Info.plist" <<EOF
-</dict>
-</plist>
-EOF
-
-    # Set proper permissions
-    chmod +x "$MACOS_DIR/$APP_NAME"
-
-    echo "✅ macOS .app bundle created at: $APP_BUNDLE"
-    echo "🎯 Double-click to run: $APP_BUNDLE"
-
-    # Test the app can be launched
-    echo "🧪 Testing app launch..."
-    if [ -x "$MACOS_DIR/$APP_NAME" ]; then
-        echo "✅ Binary is executable"
-    else
-        echo "❌ Binary is not executable - fixing permissions..."
-        chmod +x "$MACOS_DIR/$APP_NAME"
-    fi
-
-    # Optional: Create DMG
-    if command -v create-dmg &> /dev/null; then
-        echo "📦 Creating DMG installer..."
-        DMG_PATH="$BUILD_DIR/${APP_NAME}-Installer.dmg"
-        if [ -f "$DMG_PATH" ]; then
-            rm "$DMG_PATH"
-        fi
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✅ ${PLATFORM_NAME} build successful: ${OUTPUT_NAME}${NC}"
         
-        create-dmg \
-            --volname "$APP_NAME" \
-            --window-pos 200 120 \
-            --window-size 800 400 \
-            --icon-size 100 \
-            --app-drop-link 600 185 \
-            "$DMG_PATH" \
-            "$APP_BUNDLE" 2>/dev/null || true
+        # Get file size
+        SIZE=$(du -h "${OUTPUT_NAME}" | cut -f1)
+        echo -e "${GREEN}   📦 Size: ${SIZE}${NC}"
         
-        if [ -f "$DMG_PATH" ]; then
-            echo "✅ DMG created: $DMG_PATH"
+        # Make executable on Unix systems
+        if [[ "${GOOS}" != "windows" ]]; then
+            chmod +x "${OUTPUT_NAME}"
         fi
     else
-        echo "💡 Tip: Install create-dmg for DMG creation: brew install create-dmg"
+        echo -e "${RED}❌ ${PLATFORM_NAME} build failed${NC}"
+        return 1
     fi
+}
 
-elif [ "$OS" == "Linux" ]; then
-    echo "🐧 Detected Linux - Building CLI binary..."
+# Build for current platform first (Mac)
+echo -e "${YELLOW}Building for current platform...${NC}"
+build_platform "$(go env GOOS)" "$(go env GOARCH)" "current" ""
 
-    echo "🔨 Compiling Linux binary..."
-    go build -v -ldflags "$LDFLAGS" -o "$BUILD_DIR/trustdrop" .
+# Build for other platforms
+echo -e "${YELLOW}Building for other platforms...${NC}"
 
-    chmod +x "$BUILD_DIR/trustdrop"
-    echo "✅ Linux binary created at: $BUILD_DIR/trustdrop"
-
-else
-    echo "❌ Unsupported OS: $OS"
-    exit 1
+# macOS (if not already built)
+if [[ "$(go env GOOS)" != "darwin" ]]; then
+    build_platform "darwin" "amd64" "macos_intel" ""
+    build_platform "darwin" "arm64" "macos_apple_silicon" ""
 fi
 
-# Build the ledger viewer tool
-echo "🔨 Building ledger viewer..."
-cd cmd/ledger-viewer
-go build -v -ldflags "$LDFLAGS" -o "../../$BUILD_DIR/ledger-viewer" .
-cd ../..
+# Linux
+build_platform "linux" "amd64" "linux_x64" ""
+build_platform "linux" "arm64" "linux_arm64" ""
 
-echo ""
-echo "🎉 Build complete!"
-echo "📁 Build directory: $BUILD_DIR/"
-echo "🔍 Ledger viewer: $BUILD_DIR/ledger-viewer"
-echo ""
+# Windows (Note: CGO might not work for cross-compilation)
+echo -e "${YELLOW}🪟 Attempting Windows cross-compilation...${NC}"
+echo -e "${YELLOW}Note: Windows build may require CGO_ENABLED=0 for cross-compilation${NC}"
 
-if [ "$OS" == "Darwin" ]; then
-    echo "🚀 To run the app:"
-    echo "   Double-click: $BUILD_DIR/${APP_NAME}.app"
-    echo "   Or via terminal: open $BUILD_DIR/${APP_NAME}.app"
-    echo ""
-    echo "🏥 For medical deployment:"
-    echo "   1. Upload $BUILD_DIR/${APP_NAME}.app to Google Drive"
-    echo "   2. Medical staff download and double-click to run"
-    echo "   3. Allow when macOS asks for permission (first time)"
+# Try with CGO disabled for Windows
+env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -v -ldflags="-s -w" -o "${BUILD_DIR}/${APP_NAME}_windows_x64_${VERSION}.exe" .
+
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✅ Windows x64 build successful (CGO disabled)${NC}"
+    SIZE=$(du -h "${BUILD_DIR}/${APP_NAME}_windows_x64_${VERSION}.exe" | cut -f1)
+    echo -e "${GREEN}   📦 Size: ${SIZE}${NC}"
 else
-    echo "🚀 To run: ./$BUILD_DIR/trustdrop"
+    echo -e "${RED}❌ Windows x64 build failed${NC}"
+    echo -e "${YELLOW}💡 For full Windows support with CGO, build on Windows or use cross-compilation tools${NC}"
 fi
 
-echo ""
-echo "🔍 To view blockchain ledger: ./$BUILD_DIR/ledger-viewer -view"
-echo "🐛 For debugging: DEBUG=1 open $BUILD_DIR/${APP_NAME}.app"
+# Create archive with all builds
+echo -e "${YELLOW}📦 Creating release archive...${NC}"
+ARCHIVE_NAME="${APP_NAME}_multi_platform_${VERSION}.tar.gz"
+cd ${BUILD_DIR}
+tar -czf "${ARCHIVE_NAME}" ${APP_NAME}_*
+cd ..
+
+echo -e "${GREEN}✅ Release archive created: ${BUILD_DIR}/${ARCHIVE_NAME}${NC}"
+
+# Summary
+echo -e "\n${GREEN}🎉 Build Summary${NC}"
+echo -e "${GREEN}===============${NC}"
+echo -e "${GREEN}Built files:${NC}"
+ls -la ${BUILD_DIR}/${APP_NAME}_*
+
+echo -e "\n${BLUE}📋 Installation Instructions:${NC}"
+echo -e "${BLUE}Mac/Linux: chmod +x filename && ./filename${NC}"
+echo -e "${BLUE}Windows: Double-click the .exe file${NC}"
+
+echo -e "\n${GREEN}🔧 For testing Mac ↔ PC transfers:${NC}"
+echo -e "${GREEN}1. Run the appropriate binary on each machine${NC}"
+echo -e "${GREEN}2. On sender: Choose 'Send Files' and select files/folders${NC}"
+echo -e "${GREEN}3. Share the transfer code with receiver${NC}"
+echo -e "${GREEN}4. On receiver: Choose 'Receive Files' and enter the code${NC}"
+
+echo -e "\n${GREEN}✨ TrustDrop Bulletproof is ready for testing!${NC}"

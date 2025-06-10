@@ -2,90 +2,94 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
-	"trustdrop/gui"
-	"trustdrop/internal"
+
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/widget"
+
+	"trustdrop-bulletproof/gui"
+	"trustdrop-bulletproof/internal"
+	"trustdrop-bulletproof/transfer"
 )
 
 func main() {
-	// Set up better logging
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-
-	// Determine target directory for data storage
+	// Determine target data directory based on platform and context
 	var targetDataDir string
+	var err error
 
-	// Fix working directory for macOS .app bundles
 	if runtime.GOOS == "darwin" {
-		// When launched as .app bundle, working directory might be wrong
-		if execPath, err := os.Executable(); err == nil {
-			// Check if we're running from a .app bundle
-			if filepath.Base(filepath.Dir(execPath)) == "MacOS" {
-				// We're in .app/Contents/MacOS/, get the directory containing the .app bundle
-				// execPath: /path/to/TrustDrop.app/Contents/MacOS/TrustDrop
-				// We want: /path/to/ (the directory containing TrustDrop.app)
-				appBundlePath := filepath.Dir(filepath.Dir(filepath.Dir(execPath))) // Go up 3 levels
-				appParentDir := filepath.Dir(appBundlePath)                         // Get the directory containing the .app
-
-				// Set target directory but don't change working directory
-				targetDataDir = appParentDir
-				fmt.Printf("TrustDrop files will be saved to: %s/data/received/\n", appParentDir)
+		// macOS: Check if running from app bundle
+		executablePath, err := os.Executable()
+		if err != nil {
+			fmt.Printf("Error getting executable path: %v\n", err)
+			targetDataDir = "."
+		} else {
+			// Check if running from within app bundle
+			if filepath.Dir(executablePath) == "/Applications/TrustDrop.app/Contents/MacOS" ||
+				filepath.Base(filepath.Dir(filepath.Dir(executablePath))) == "Contents" {
+				// Running from app bundle - use Desktop
+				homeDir, err := os.UserHomeDir()
+				if err != nil {
+					targetDataDir = "."
+				} else {
+					targetDataDir = filepath.Join(homeDir, "Desktop", "TrustDrop")
+				}
+			} else {
+				// Running from development or terminal - use current directory
+				targetDataDir = "."
 			}
 		}
+	} else {
+		// Windows and other platforms - use current directory
+		targetDataDir = "."
 	}
 
-	// If no target directory set, use current working directory
-	if targetDataDir == "" {
-		targetDataDir, _ = os.Getwd()
-	}
-
-	// Only show console output in debug mode
-	if os.Getenv("DEBUG") != "" {
-		fmt.Printf("TrustDrop - Secure File Transfer\n")
-		fmt.Printf("===============================\n")
-		fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
-		fmt.Printf("Go Version: %s\n", runtime.Version())
-		fmt.Printf("Working Directory: %s\n", getCurrentDir())
-		fmt.Printf("Target Data Directory: %s\n", targetDataDir)
-		fmt.Printf("\n")
-	}
-
-	// Ensure data directories exist in target location
-	if err := internal.EnsureDataDirectoryAtPath(targetDataDir); err != nil {
-		log.Fatalf("Failed to create data directories: %v", err)
-	}
-
-	// Enable croc debug logging only if DEBUG env var is set
-	if os.Getenv("DEBUG") != "" {
-		os.Setenv("CROC_DEBUG", "1")
-		fmt.Println("Debug mode enabled")
-		fmt.Println("Starting TrustDrop application...")
-		fmt.Println("")
-		fmt.Println("=== USAGE NOTES ===")
-		fmt.Println("• To SEND: Click 'Send Files', copy your code, then select files")
-		fmt.Println("• To RECEIVE: Click 'Receive Files' and enter the sender's code")
-		fmt.Println("• All transfers use AES-256 encryption and blockchain logging")
-		fmt.Printf("• Received files are saved to: %s\n", filepath.Join(targetDataDir, "data", "received"))
-		fmt.Println("===================")
-		fmt.Println("")
-	}
-
-	// Create and run the app - this blocks on the main thread
-	app, err := gui.NewTrustDropApp(targetDataDir)
+	// Ensure the data directory exists
+	err = internal.EnsureDataDirectoryAtPath(targetDataDir)
 	if err != nil {
-		log.Fatalf("Failed to initialize TrustDrop: %v", err)
+		fmt.Printf("Error creating data directory: %v\n", err)
+		targetDataDir = "." // Fallback to current directory
 	}
 
-	// This call blocks until the app is closed - critical for .app bundles
-	app.Run()
-}
+	fmt.Printf("TrustDrop Bulletproof Edition starting...\n")
+	fmt.Printf("Data directory: %s\n", targetDataDir)
 
-func getCurrentDir() string {
-	dir, err := os.Getwd()
+	// Initialize bulletproof transfer manager
+	fmt.Printf("Initializing bulletproof transfer manager...\n")
+	transferManager, err := transfer.NewBulletproofTransferManager(targetDataDir)
 	if err != nil {
-		return "unknown"
+		fmt.Printf("Failed to initialize bulletproof transfer manager: %v\n", err)
+		// Fallback to basic GUI without bulletproof features
+		basicApp := app.New()
+		basicWindow := basicApp.NewWindow("TrustDrop - Error")
+		basicWindow.SetContent(widget.NewLabel(fmt.Sprintf("Failed to initialize: %v", err)))
+		basicWindow.ShowAndRun()
+		return
 	}
-	return dir
+	defer transferManager.Close()
+
+	fmt.Printf("Transfer manager initialized successfully\n")
+
+	// Create and run GUI with bulletproof manager
+	fmt.Printf("Creating GUI...\n")
+	bulletproofApp := gui.NewAppWithBulletproofManager(transferManager, targetDataDir)
+	if bulletproofApp == nil {
+		fmt.Printf("Failed to create GUI application\n")
+		return
+	}
+
+	fmt.Printf("GUI created successfully\n")
+
+	// Display network status
+	fmt.Printf("Getting network status...\n")
+	networkStatus := transferManager.GetNetworkStatus()
+	fmt.Printf("Network Analysis Complete:\n")
+	fmt.Printf("- Network Profile: %+v\n", networkStatus["network_profile"])
+	fmt.Printf("- Available Transports: %+v\n", networkStatus["transport_status"])
+
+	// Run the application
+	fmt.Printf("Starting GUI...\n")
+	bulletproofApp.Run()
 }

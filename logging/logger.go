@@ -5,17 +5,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
-	"trustdrop/blockchain"
+	"trustdrop-bulletproof/blockchain"
 )
 
 type TransferLog struct {
 	Timestamp time.Time `json:"timestamp"`
 	PeerID    string    `json:"peer_id"`
 	FileName  string    `json:"file_name"`
-	FileHash  string    `json:"file_hash"`  // SHA-256 hash of file content
+	FileHash  string    `json:"file_hash"` // SHA-256 hash of file content
 	FileSize  int64     `json:"file_size"`
 	Direction string    `json:"direction"` // "send" or "receive"
 	Status    string    `json:"status"`    // "success" or "failed"
@@ -28,7 +29,7 @@ type Logger struct {
 	blockchain *blockchain.Blockchain
 }
 
-func NewLogger() (*Logger, error) {
+func NewLogger(filename ...string) (*Logger, error) {
 	// Create logs directory if it doesn't exist
 	logsDir := "logs"
 	if err := os.MkdirAll(logsDir, 0700); err != nil {
@@ -36,7 +37,10 @@ func NewLogger() (*Logger, error) {
 	}
 
 	logFile := filepath.Join(logsDir, "transfers.log")
-	
+	if len(filename) > 0 && filename[0] != "" {
+		logFile = filepath.Join(logsDir, filename[0])
+	}
+
 	// Initialize blockchain
 	bc, err := blockchain.NewBlockchain()
 	if err != nil {
@@ -49,10 +53,30 @@ func NewLogger() (*Logger, error) {
 	}, nil
 }
 
+// LogInfo logs an info message (compatibility for bulletproof manager)
+func (l *Logger) LogInfo(message string) {
+	log.Printf("[INFO] %s", message)
+}
+
+// LogError logs an error message (compatibility for bulletproof manager)
+func (l *Logger) LogError(message string) {
+	log.Printf("[ERROR] %s", message)
+}
+
+// LogWarning logs a warning message (compatibility for bulletproof manager)
+func (l *Logger) LogWarning(message string) {
+	log.Printf("[WARNING] %s", message)
+}
+
+// Close closes the logger (compatibility for bulletproof manager)
+func (l *Logger) Close() error {
+	return nil
+}
+
 func (l *Logger) LogTransfer(log TransferLog) error {
 	// Generate transfer ID
 	transferID := generateTransferID(log)
-	
+
 	// Create blockchain transfer data
 	transferData := blockchain.TransferData{
 		TransferID: transferID,
@@ -98,7 +122,7 @@ func (l *Logger) appendToLogFile(log TransferLog) error {
 func (l *Logger) GetLogs() ([]TransferLog, error) {
 	// Get logs from blockchain
 	transfers := l.blockchain.GetTransferHistory()
-	
+
 	logs := make([]TransferLog, len(transfers))
 	for i, transfer := range transfers {
 		logs[i] = TransferLog{
@@ -131,13 +155,13 @@ func (l *Logger) ExportLedger(filename string) error {
 func (l *Logger) GetBlockchainInfo() map[string]interface{} {
 	latestBlock := l.blockchain.GetLatestBlock()
 	chainLength := l.blockchain.GetChainLength()
-	
+
 	info := map[string]interface{}{
 		"chain_length":   chainLength,
 		"latest_block":   nil,
 		"ledger_healthy": false,
 	}
-	
+
 	if latestBlock != nil {
 		info["latest_block"] = map[string]interface{}{
 			"index":     latestBlock.Index,
@@ -145,11 +169,11 @@ func (l *Logger) GetBlockchainInfo() map[string]interface{} {
 			"timestamp": latestBlock.Timestamp,
 		}
 	}
-	
+
 	// Verify chain integrity
 	healthy, _ := l.blockchain.VerifyChain()
 	info["ledger_healthy"] = healthy
-	
+
 	return info
 }
 
@@ -161,7 +185,7 @@ func generateTransferID(log TransferLog) string {
 		log.FileName,
 		log.FileSize,
 		log.Direction)
-	
+
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:])[:16] // Use first 16 chars of hash
 }

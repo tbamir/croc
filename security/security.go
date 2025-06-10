@@ -5,65 +5,71 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 )
 
-// EncryptAES256CBC encrypts data using AES-256-CBC
-func EncryptAES256CBC(data []byte, key []byte) ([]byte, error) {
-	if len(key) != 32 {
-		return nil, fmt.Errorf("key must be 32 bytes for AES-256")
-	}
+// EncryptAES256CBC encrypts data using AES-256-CBC (legacy compatibility)
+func EncryptAES256CBC(data, key []byte) ([]byte, error) {
+	// Derive a proper 32-byte key
+	hasher := sha256.New()
+	hasher.Write(key)
+	derivedKey := hasher.Sum(nil)
 
-	block, err := aes.NewCipher(key)
+	// Create AES cipher
+	block, err := aes.NewCipher(derivedKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
 	}
-
-	// Add PKCS7 padding
-	padding := aes.BlockSize - len(data)%aes.BlockSize
-	padtext := make([]byte, padding)
-	for i := range padtext {
-		padtext[i] = byte(padding)
-	}
-	data = append(data, padtext...)
 
 	// Generate random IV
 	iv := make([]byte, aes.BlockSize)
 	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to generate IV: %w", err)
 	}
+
+	// Pad data to block size
+	paddedData := pkcs7Pad(data, aes.BlockSize)
 
 	// Encrypt
 	mode := cipher.NewCBCEncrypter(block, iv)
-	ciphertext := make([]byte, len(data))
-	mode.CryptBlocks(ciphertext, data)
+	ciphertext := make([]byte, len(paddedData))
+	mode.CryptBlocks(ciphertext, paddedData)
 
 	// Prepend IV to ciphertext
-	return append(iv, ciphertext...), nil
+	result := make([]byte, len(iv)+len(ciphertext))
+	copy(result[:len(iv)], iv)
+	copy(result[len(iv):], ciphertext)
+
+	return result, nil
 }
 
-// DecryptAES256CBC decrypts data using AES-256-CBC
-func DecryptAES256CBC(data []byte, key []byte) ([]byte, error) {
-	if len(key) != 32 {
-		return nil, fmt.Errorf("key must be 32 bytes for AES-256")
-	}
+// DecryptAES256CBC decrypts data using AES-256-CBC (legacy compatibility)
+func DecryptAES256CBC(data, key []byte) ([]byte, error) {
+	// Derive a proper 32-byte key
+	hasher := sha256.New()
+	hasher.Write(key)
+	derivedKey := hasher.Sum(nil)
 
-	if len(data) < aes.BlockSize {
-		return nil, fmt.Errorf("ciphertext too short")
-	}
-
-	block, err := aes.NewCipher(key)
+	// Create AES cipher
+	block, err := aes.NewCipher(derivedKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
+	}
+
+	// Check minimum length
+	if len(data) < aes.BlockSize {
+		return nil, errors.New("ciphertext too short")
 	}
 
 	// Extract IV and ciphertext
 	iv := data[:aes.BlockSize]
 	ciphertext := data[aes.BlockSize:]
 
+	// Check if ciphertext is properly aligned
 	if len(ciphertext)%aes.BlockSize != 0 {
-		return nil, fmt.Errorf("ciphertext is not a multiple of the block size")
+		return nil, errors.New("ciphertext is not a multiple of block size")
 	}
 
 	// Decrypt
@@ -71,19 +77,39 @@ func DecryptAES256CBC(data []byte, key []byte) ([]byte, error) {
 	plaintext := make([]byte, len(ciphertext))
 	mode.CryptBlocks(plaintext, ciphertext)
 
-	// Remove PKCS7 padding
-	padding := int(plaintext[len(plaintext)-1])
-	if padding > aes.BlockSize || padding == 0 {
-		return nil, fmt.Errorf("invalid padding")
+	// Remove padding
+	return pkcs7Unpad(plaintext)
+}
+
+// pkcs7Pad pads data to the specified block size using PKCS#7
+func pkcs7Pad(data []byte, blockSize int) []byte {
+	padding := blockSize - len(data)%blockSize
+	padText := make([]byte, padding)
+	for i := range padText {
+		padText[i] = byte(padding)
+	}
+	return append(data, padText...)
+}
+
+// pkcs7Unpad removes PKCS#7 padding from data
+func pkcs7Unpad(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, errors.New("data is empty")
 	}
 
-	for i := len(plaintext) - padding; i < len(plaintext); i++ {
-		if plaintext[i] != byte(padding) {
-			return nil, fmt.Errorf("invalid padding")
+	padding := int(data[len(data)-1])
+	if padding == 0 || padding > len(data) {
+		return nil, errors.New("invalid padding")
+	}
+
+	// Verify padding
+	for i := len(data) - padding; i < len(data); i++ {
+		if data[i] != byte(padding) {
+			return nil, errors.New("invalid padding")
 		}
 	}
 
-	return plaintext[:len(plaintext)-padding], nil
+	return data[:len(data)-padding], nil
 }
 
 // GenerateKey generates a random 256-bit key

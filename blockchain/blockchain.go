@@ -13,26 +13,26 @@ import (
 
 // Block represents a single block in the blockchain
 type Block struct {
-	Index        int64             `json:"index"`
-	Timestamp    time.Time         `json:"timestamp"`
-	Data         TransferData      `json:"data"`
-	PreviousHash string            `json:"previous_hash"`
-	Hash         string            `json:"hash"`
-	Nonce        int               `json:"nonce"`
+	Index        int64        `json:"index"`
+	Timestamp    time.Time    `json:"timestamp"`
+	Data         TransferData `json:"data"`
+	PreviousHash string       `json:"previous_hash"`
+	Hash         string       `json:"hash"`
+	Nonce        int          `json:"nonce"`
 }
 
 // TransferData contains the transfer information to be stored in a block
 type TransferData struct {
-	TransferID   string    `json:"transfer_id"`
-	PeerID       string    `json:"peer_id"`
-	FileName     string    `json:"file_name"`
-	FileSize     int64     `json:"file_size"`
-	FileHash     string    `json:"file_hash"` // SHA-256 hash of file content
-	Direction    string    `json:"direction"` // "send" or "receive"
-	Status       string    `json:"status"`    // "success" or "failed"
-	Error        string    `json:"error,omitempty"`
-	Duration     string    `json:"duration,omitempty"`
-	Timestamp    time.Time `json:"timestamp"`
+	TransferID string    `json:"transfer_id"`
+	PeerID     string    `json:"peer_id"`
+	FileName   string    `json:"file_name"`
+	FileSize   int64     `json:"file_size"`
+	FileHash   string    `json:"file_hash"` // SHA-256 hash of file content
+	Direction  string    `json:"direction"` // "send" or "receive"
+	Status     string    `json:"status"`    // "success" or "failed"
+	Error      string    `json:"error,omitempty"`
+	Duration   string    `json:"duration,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
 }
 
 // Blockchain represents the entire chain
@@ -98,17 +98,17 @@ func (bc *Blockchain) createGenesisBlock() {
 
 // calculateHash calculates the SHA-256 hash of a block
 func (bc *Blockchain) calculateHash(block Block) string {
-	data := fmt.Sprintf("%d%s%s%s%d", 
-		block.Index, 
-		block.Timestamp.String(), 
+	data := fmt.Sprintf("%d%s%s%s%d",
+		block.Index,
+		block.Timestamp.String(),
 		block.PreviousHash,
 		block.Data.TransferID,
 		block.Nonce)
-	
+
 	// Include all transfer data in hash
 	transferJSON, _ := json.Marshal(block.Data)
 	data += string(transferJSON)
-	
+
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:])
 }
@@ -177,7 +177,7 @@ func (bc *Blockchain) VerifyChain() (bool, error) {
 func (bc *Blockchain) GetBlocks() []Block {
 	bc.mutex.RLock()
 	defer bc.mutex.RUnlock()
-	
+
 	// Return a copy to prevent external modification
 	blocksCopy := make([]Block, len(bc.blocks))
 	copy(blocksCopy, bc.blocks)
@@ -286,4 +286,32 @@ func (bc *Blockchain) GetChainLength() int {
 	bc.mutex.RLock()
 	defer bc.mutex.RUnlock()
 	return len(bc.blocks)
+}
+
+// TransferEntry represents a transfer record (compatibility adapter)
+type TransferEntry struct {
+	TransferCode string    `json:"transfer_code"`
+	Timestamp    time.Time `json:"timestamp"`
+	FileCount    int       `json:"file_count"`
+	TotalSize    int64     `json:"total_size"`
+	Success      bool      `json:"success"`
+	Transport    string    `json:"transport"`
+}
+
+// AddTransferEntry adds a transfer entry (adapter for bulletproof manager)
+func (bc *Blockchain) AddTransferEntry(entry TransferEntry) error {
+	// Convert TransferEntry to TransferData
+	data := TransferData{
+		TransferID: entry.TransferCode,
+		PeerID:     "bulletproof-system",
+		FileName:   fmt.Sprintf("%d files", entry.FileCount),
+		FileSize:   entry.TotalSize,
+		FileHash:   "bulletproof-entry",
+		Direction:  "bulletproof",
+		Status:     map[bool]string{true: "success", false: "failed"}[entry.Success],
+		Duration:   "",
+		Timestamp:  entry.Timestamp,
+	}
+
+	return bc.AddBlock(data)
 }
