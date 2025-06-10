@@ -417,7 +417,7 @@ func RandomFileName() (fname string, err error) {
 func FindOpenPorts(host string, portNumStart, numPorts int) (openPorts []int) {
 	openPorts = []int{}
 	for port := portNumStart; port-portNumStart < 200; port++ {
-		timeout := 100 * time.Millisecond
+		timeout := 2 * time.Second
 		conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprint(port)), timeout)
 		if conn != nil {
 			conn.Close()

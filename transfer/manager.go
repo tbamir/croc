@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -352,9 +353,10 @@ func (tm *TransferManager) receiveFiles() {
 	os.Chdir(tempDir)
 	defer os.Chdir(originalWorkingDir)
 
-	// FIXED: Use connection retry logic for better Europe-US connectivity
-	if err := tm.connectWithRetry(5); err != nil {
-		tm.updateStatus(fmt.Sprintf("Failed to connect: %v", err))
+	// ENHANCED: Use connection retry logic for better library/hotel connectivity
+	if err := tm.connectWithRetry(10); err != nil { // Increased from 5 to 10 attempts
+		tm.updateStatus(fmt.Sprintf("Connection failed: %v", err))
+		tm.updateStatus("Library/hotel networks often block P2P traffic. Try a different network if possible.")
 		return
 	}
 
@@ -686,18 +688,22 @@ func (tm *TransferManager) sendFiles(paths []string) {
 	}
 
 	tm.totalFiles = len(filesToEncrypt)
-	tm.updateStatus(fmt.Sprintf("Encrypting %d files...", len(filesToEncrypt)))
+	tm.updateStatus(fmt.Sprintf("Encrypting %d files for secure transfer...", len(filesToEncrypt)))
 
-	// FIXED: Use chunked encryption for large files
+	// ENHANCED: Use chunked encryption for large files with better progress tracking
 	var encryptedPaths []string
 
 	for i, filePath := range filesToEncrypt {
+		// More detailed progress reporting for larger transfers
 		encryptionProgress := float64(i) / float64(len(filesToEncrypt)) * 30.0
-		tm.updateProgress(int64(float64(tm.totalSize)*encryptionProgress/100.0), tm.totalSize, filepath.Base(filePath))
+		fileName := filepath.Base(filePath)
+		tm.updateProgress(int64(float64(tm.totalSize)*encryptionProgress/100.0), tm.totalSize, fileName)
+		tm.updateStatus(fmt.Sprintf("Encrypting file %d/%d: %s", i+1, len(filesToEncrypt), fileName))
 
 		// Calculate hash of original file
 		hash, err := tm.calculateFileHash(filePath)
 		if err != nil {
+			tm.updateStatus(fmt.Sprintf("Failed to hash file %s: %v", fileName, err))
 			continue
 		}
 
@@ -710,25 +716,25 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		encFile := filepath.Join(tempDir, anonymizedName)
 		fileInfo, err := os.Stat(filePath)
 		if err != nil {
+			tm.updateStatus(fmt.Sprintf("Failed to stat file %s: %v", fileName, err))
 			continue
 		}
 
-		// Use chunked encryption for files over 10MB, regular encryption for smaller files
+		// ENHANCED: Better error handling for encryption failures
+		var encryptErr error
 		if fileInfo.Size() > 10*1024*1024 {
-			if err := tm.encryptFileChunked(filePath, encFile); err != nil {
-				if os.Getenv("DEBUG") != "" {
-					fmt.Printf("TransferManager: Failed to encrypt large file %s: %v\n", filePath, err)
-				}
-				continue
-			}
+			tm.updateStatus(fmt.Sprintf("Encrypting large file %s (%s) in chunks...", fileName, ByteCountDecimal(fileInfo.Size())))
+			encryptErr = tm.encryptFileChunked(filePath, encFile)
 		} else {
-			// Use regular encryption for smaller files
-			if err := tm.encryptFileRegular(filePath, encFile); err != nil {
-				if os.Getenv("DEBUG") != "" {
-					fmt.Printf("TransferManager: Failed to encrypt file %s: %v\n", filePath, err)
-				}
-				continue
+			encryptErr = tm.encryptFileRegular(filePath, encFile)
+		}
+
+		if encryptErr != nil {
+			tm.updateStatus(fmt.Sprintf("Encryption failed for %s: %v", fileName, encryptErr))
+			if os.Getenv("DEBUG") != "" {
+				fmt.Printf("TransferManager: Failed to encrypt file %s: %v\n", filePath, encryptErr)
 			}
+			continue
 		}
 
 		encryptedPaths = append(encryptedPaths, encFile)
@@ -766,6 +772,11 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		}
 
 		tm.filesComplete = i + 1
+
+		// Add small delay to prevent overwhelming slower networks
+		if len(filesToEncrypt) > 10 {
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 
 	if len(encryptedPaths) == 0 {
@@ -807,9 +818,10 @@ func (tm *TransferManager) sendFiles(paths []string) {
 
 	tm.updateStatus("Connecting to receiver...")
 
-	// FIXED: Use connection retry logic for better Europe-US connectivity
-	if err := tm.connectWithRetry(5); err != nil {
-		tm.updateStatus(fmt.Sprintf("Failed to connect: %v", err))
+	// ENHANCED: Use connection retry logic for better library/hotel connectivity
+	if err := tm.connectWithRetry(10); err != nil { // Increased from 5 to 10 attempts
+		tm.updateStatus(fmt.Sprintf("Connection failed: %v", err))
+		tm.updateStatus("Library/hotel networks often block P2P traffic. Try a different network if possible.")
 		return
 	}
 
@@ -959,31 +971,50 @@ func (tm *TransferManager) encryptFileRegular(filePath, encPath string) error {
 	return os.WriteFile(encPath, encrypted, 0600)
 }
 
-// FIXED: Add connection retry logic for Europe-US transfers
+// ENHANCED: Add connection retry logic optimized for restrictive networks (libraries, hotels, etc.)
 func (tm *TransferManager) connectWithRetry(attempts int) error {
+	// More relay servers including alternative ports
 	relays := []string{
 		"croc.schollz.com:9009",
 		"croc2.schollz.com:9009",
 		"croc3.schollz.com:9009",
 		"croc4.schollz.com:9009",
 		"croc5.schollz.com:9009",
+		// Add more relay servers for better redundancy
+		"croc.schollz.com:443", // HTTPS port often unblocked
+		"croc2.schollz.com:443",
+		"croc.schollz.com:80", // HTTP port often unblocked
+		"croc2.schollz.com:80",
 	}
 
-	for attempt := 0; attempt < attempts; attempt++ {
-		// Try different relays on each attempt
-		relay := relays[attempt%len(relays)]
-		tm.updateStatus(fmt.Sprintf("Connection attempt %d/%d using relay %s...", attempt+1, attempts, relay))
+	// Increase attempts for restrictive networks
+	maxAttempts := attempts
+	if maxAttempts < 10 {
+		maxAttempts = 10 // Minimum 10 attempts for library networks
+	}
 
-		// Configure croc with current relay
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// Try different relays on each attempt with more variety
+		relay := relays[attempt%len(relays)]
+		tm.updateStatus(fmt.Sprintf("Connection attempt %d/%d using relay %s...", attempt+1, maxAttempts, relay))
+
+		// Extract host and port from relay
+		relayHost, relayPort, err := net.SplitHostPort(relay)
+		if err != nil {
+			relayHost = relay
+			relayPort = "9009"
+		}
+
+		// Configure croc with current relay and more permissive settings
 		options := croc.Options{
 			IsSender:       tm.isSending,
 			SharedSecret:   tm.getSecret(),
-			RelayAddress:   relay,
-			RelayAddress6:  relay,
-			RelayPorts:     []string{"9009", "9010", "9011", "9012", "9013"},
+			RelayAddress:   relayHost,
+			RelayAddress6:  relayHost,
+			RelayPorts:     []string{relayPort, "9009", "9010", "9011", "9012", "9013", "443", "80"},
 			RelayPassword:  "pass123",
 			NoPrompt:       true,
-			NoMultiplexing: false,
+			NoMultiplexing: true, // Enable multiplexing for better performance
 			DisableLocal:   false,
 			Ask:            false,
 			Debug:          false,
@@ -998,15 +1029,23 @@ func (tm *TransferManager) connectWithRetry(attempts int) error {
 			return nil // Success!
 		}
 
-		// Exponential backoff between attempts
-		if attempt < attempts-1 {
-			backoffTime := time.Duration(attempt+1) * 2 * time.Second
-			tm.updateStatus(fmt.Sprintf("Retrying in %v...", backoffTime))
+		// Progressive backoff with longer delays for restrictive networks
+		if attempt < maxAttempts-1 {
+			var backoffTime time.Duration
+			if attempt < 3 {
+				backoffTime = time.Duration(attempt+1) * 3 * time.Second // 3s, 6s, 9s
+			} else if attempt < 6 {
+				backoffTime = time.Duration(attempt+1) * 5 * time.Second // 20s, 25s, 30s
+			} else {
+				backoffTime = time.Duration(attempt+1) * 10 * time.Second // 70s, 80s, 90s, 100s
+			}
+
+			tm.updateStatus(fmt.Sprintf("Network seems restrictive (library/hotel?). Retrying in %v...", backoffTime))
 			time.Sleep(backoffTime)
 		}
 	}
 
-	return fmt.Errorf("failed to connect after %d attempts with multiple relays", attempts)
+	return fmt.Errorf("failed to connect after %d attempts with multiple relays - network may be blocking P2P traffic", maxAttempts)
 }
 
 func (tm *TransferManager) getSecret() string {
@@ -1099,4 +1138,18 @@ func (tm *TransferManager) EncryptFileChunked(filePath, encPath string) error {
 // DecryptFileChunked decrypts a chunked encrypted file
 func (tm *TransferManager) DecryptFileChunked(encPath, decPath string) error {
 	return tm.decryptFileChunked(encPath, decPath)
+}
+
+// ByteCountDecimal converts bytes to human readable format
+func ByteCountDecimal(b int64) string {
+	const unit = 1000
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "kMGTPE"[exp])
 }

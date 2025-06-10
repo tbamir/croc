@@ -133,8 +133,8 @@ func lookup(address string) (ipaddress string, err error) {
 
 // localLookupIP returns a host's IP address using the local DNS configuration.
 func localLookupIP(address string) (ipaddress string, err error) {
-	// Create a context with a 500 millisecond timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	// ENHANCED: Increased timeout for restrictive networks (libraries, hotels, etc.)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	r := &net.Resolver{}
@@ -150,7 +150,8 @@ func localLookupIP(address string) (ipaddress string, err error) {
 
 // remoteLookupIP returns a host's IP address based on a remote DNS server.
 func remoteLookupIP(address, dns string) (ipaddress string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	// ENHANCED: Increased timeout for restrictive networks
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	r := &net.Resolver{
