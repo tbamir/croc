@@ -101,9 +101,9 @@ func (mtm *MultiTransportManager) initializeBasicTransports() error {
 	crocTransport := NewCrocTransport(100)
 	if err := crocTransport.Setup(mtm.config); err == nil {
 		mtm.transports = append(mtm.transports, crocTransport)
-		fmt.Printf("✅ Croc transport initialized\n")
+		fmt.Printf("Croc transport initialized\n")
 	} else {
-		fmt.Printf("⚠️ Failed to setup croc transport: %v\n", err)
+		fmt.Printf("Failed to setup croc transport: %v\n", err)
 	}
 
 	if len(mtm.transports) == 0 {

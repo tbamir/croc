@@ -5,9 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/widget"
-
 	"trustdrop-bulletproof/gui"
 	"trustdrop-bulletproof/internal"
 	"trustdrop-bulletproof/transfer"
@@ -41,52 +38,56 @@ func main() {
 		}
 	}
 
-	// Ensure the data directory structure exists
-	err = internal.EnsureDataDirectoryAtPath(targetDataDir)
-	if err != nil {
-		fmt.Printf("Error creating data directory: %v\n", err)
-		targetDataDir = "." // Fallback to current directory
+	// Create data directory if needed
+	if err := internal.EnsureDataDirectoryAtPath(targetDataDir); err != nil {
+		fmt.Printf("Warning: %v\n", err)
 	}
 
-	fmt.Printf("🚀 TrustDrop starting...\n")
-	fmt.Printf("📂 Downloads will be saved to: %s\n", filepath.Join(targetDataDir, "received"))
+	fmt.Printf("TrustDrop starting...\n")
+	fmt.Printf("Downloads will be saved to: %s\n", filepath.Join(targetDataDir, "received"))
 
-	// Initialize bulletproof transfer manager
-	fmt.Printf("⚙️  Initializing transfer manager...\n")
+	// Initialize transfer manager with data directory
+	fmt.Printf("Initializing transfer manager...\n")
 	transferManager, err := transfer.NewBulletproofTransferManager(targetDataDir)
 	if err != nil {
-		fmt.Printf("❌ Failed to initialize transfer manager: %v\n", err)
-		// Fallback to basic GUI without bulletproof features
-		basicApp := app.New()
-		basicWindow := basicApp.NewWindow("TrustDrop - Error")
-		basicWindow.SetContent(widget.NewLabel(fmt.Sprintf("Failed to initialize: %v", err)))
-		basicWindow.ShowAndRun()
+		fmt.Printf("Failed to create transfer manager: %v\n", err)
 		return
 	}
 	defer transferManager.Close()
 
-	fmt.Printf("✅ Transfer manager ready\n")
+	// Adapt settings to network conditions
+	transferManager.SetStatusCallback(func(status string) {
+		fmt.Printf("Status: %s\n", status)
+	})
 
-	// Create and run GUI with bulletproof manager
-	fmt.Printf("🎨 Creating GUI...\n")
-	bulletproofApp := gui.NewAppWithBulletproofManager(transferManager, targetDataDir)
-	if bulletproofApp == nil {
-		fmt.Printf("❌ Failed to create GUI application\n")
+	transferManager.SetProgressCallback(func(current, total int64, fileName string) {
+		if total > 0 {
+			progress := float64(current) / float64(total) * 100
+			fmt.Printf("Progress: %.1f%% - %s\n", progress, fileName)
+		}
+	})
+
+	fmt.Printf("Transfer manager ready\n")
+
+	// Create GUI
+	fmt.Printf("Creating GUI...\n")
+	app := gui.NewAppWithBulletproofManager(transferManager, targetDataDir)
+	if app == nil {
+		fmt.Printf("Failed to create GUI\n")
 		return
 	}
+	fmt.Printf("GUI ready\n")
 
-	fmt.Printf("✅ GUI ready\n")
-
-	// Display network status
-	networkStatus := transferManager.GetNetworkStatus()
-	fmt.Printf("🌐 Network Status:\n")
-	if transportStatus, ok := networkStatus["transport_status"].(map[string]interface{}); ok {
+	// Show network status
+	status := transferManager.GetNetworkStatus()
+	fmt.Printf("Network Status:\n")
+	if transportStatus, ok := status["transport_status"].(map[string]interface{}); ok {
 		fmt.Printf("   Available Transports: %d\n", len(transportStatus))
 	}
 
-	fmt.Printf("🎉 TrustDrop is ready!\n")
-	fmt.Printf("📋 Your downloads will be saved to:\n   %s\n", filepath.Join(targetDataDir, "received"))
+	fmt.Printf("TrustDrop is ready!\n")
+	fmt.Printf("Your downloads will be saved to:\n   %s\n", filepath.Join(targetDataDir, "received"))
 
 	// Run the application
-	bulletproofApp.Run()
+	app.Run()
 }
