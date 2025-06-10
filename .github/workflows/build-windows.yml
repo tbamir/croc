@@ -1,0 +1,56 @@
+name: Build Windows Release
+
+on:
+  push:
+    branches: [ TrustDropFinal ]
+  pull_request:
+    branches: [ TrustDropFinal ]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Install dependencies
+      run: go mod download
+    
+    - name: Build for Windows
+      run: |
+        go build -v -ldflags="-s -w -H=windowsgui" -o build/TrustDrop.exe .
+        
+    - name: Build ledger viewer
+      run: |
+        if (Test-Path "cmd/ledger-viewer") {
+          cd cmd/ledger-viewer
+          go build -v -ldflags="-s -w" -o ../../build/ledger-viewer.exe .
+          cd ../..
+        }
+      shell: powershell
+    
+    - name: Create documentation
+      run: |
+        echo "TrustDrop - Secure Medical File Transfer" > build/README.txt
+        echo "" >> build/README.txt
+        echo "✅ Includes critical fix for large clinical files (>10MB)" >> build/README.txt
+        echo "✅ Supports high-resolution medical images, large PDFs, DICOM series" >> build/README.txt
+        echo "" >> build/README.txt
+        echo "To run: Double-click TrustDrop.exe" >> build/README.txt
+      shell: powershell
+      
+    - name: Upload Windows Build
+      uses: actions/upload-artifact@v3
+      with:
+        name: TrustDrop-Windows
+        path: |
+          build/TrustDrop.exe
+          build/ledger-viewer.exe
+          build/README.txt
+        retention-days: 30 

@@ -706,22 +706,35 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		hasher.Write([]byte(filePath + hash))
 		anonymizedName := hex.EncodeToString(hasher.Sum(nil))[:32]
 
-		// FIXED: Use chunked encryption instead of loading entire file
+		// CRITICAL FIX: Use chunked encryption only for large files (>10MB)
 		encFile := filepath.Join(tempDir, anonymizedName)
-		if err := tm.encryptFileChunked(filePath, encFile); err != nil {
-			if os.Getenv("DEBUG") != "" {
-				fmt.Printf("TransferManager: Failed to encrypt file %s: %v\n", filePath, err)
-			}
+		fileInfo, err := os.Stat(filePath)
+		if err != nil {
 			continue
+		}
+
+		// Use chunked encryption for files over 10MB, regular encryption for smaller files
+		if fileInfo.Size() > 10*1024*1024 {
+			if err := tm.encryptFileChunked(filePath, encFile); err != nil {
+				if os.Getenv("DEBUG") != "" {
+					fmt.Printf("TransferManager: Failed to encrypt large file %s: %v\n", filePath, err)
+				}
+				continue
+			}
+		} else {
+			// Use regular encryption for smaller files
+			if err := tm.encryptFileRegular(filePath, encFile); err != nil {
+				if os.Getenv("DEBUG") != "" {
+					fmt.Printf("TransferManager: Failed to encrypt file %s: %v\n", filePath, err)
+				}
+				continue
+			}
 		}
 
 		encryptedPaths = append(encryptedPaths, encFile)
 
 		// Get file size for manifest
-		fileInfo, err := os.Stat(filePath)
-		if err != nil {
-			continue
-		}
+		fileSize := fileInfo.Size()
 
 		// Determine relative path for the manifest
 		var relativePath string
@@ -741,7 +754,7 @@ func (tm *TransferManager) sendFiles(paths []string) {
 			OriginalPath:   filePath,
 			RelativePath:   relativePath,
 			IsDirectory:    false,
-			Size:           fileInfo.Size(),
+			Size:           fileSize,
 			Hash:           hash,
 			AnonymizedName: anonymizedName,
 		}
@@ -749,7 +762,7 @@ func (tm *TransferManager) sendFiles(paths []string) {
 		tm.fileHashes[relativePath] = hash
 		if tm.currentFile == "" {
 			tm.currentFile = relativePath
-			tm.currentSize = fileInfo.Size()
+			tm.currentSize = fileSize
 		}
 
 		tm.filesComplete = i + 1
@@ -926,6 +939,24 @@ func (tm *TransferManager) encryptFileChunked(filePath, encPath string) error {
 		}
 	}
 	return nil
+}
+
+// FIXED: Add regular file encryption for files under 10MB
+func (tm *TransferManager) encryptFileRegular(filePath, encPath string) error {
+	// Read the entire file for regular encryption
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	// Encrypt the file data
+	encrypted, err := security.EncryptAES256CBC(data, tm.encryptionKey)
+	if err != nil {
+		return err
+	}
+
+	// Write encrypted data to output file
+	return os.WriteFile(encPath, encrypted, 0600)
 }
 
 // FIXED: Add connection retry logic for Europe-US transfers
