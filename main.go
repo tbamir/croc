@@ -49,7 +49,7 @@ func main() {
 	}
 
 	fmt.Printf("🚀 TrustDrop starting...\n")
-	fmt.Printf("📂 Downloads will be saved to: %s\n", filepath.Join(targetDataDir, "data", "received"))
+	fmt.Printf("📂 Downloads will be saved to: %s\n", filepath.Join(targetDataDir, "received"))
 
 	// Initialize bulletproof transfer manager
 	fmt.Printf("⚙️  Initializing transfer manager...\n")
@@ -85,7 +85,7 @@ func main() {
 	}
 
 	fmt.Printf("🎉 TrustDrop is ready!\n")
-	fmt.Printf("📋 Your downloads will be saved to:\n   %s\n", filepath.Join(targetDataDir, "data", "received"))
+	fmt.Printf("📋 Your downloads will be saved to:\n   %s\n", filepath.Join(targetDataDir, "received"))
 
 	// Run the application
 	bulletproofApp.Run()

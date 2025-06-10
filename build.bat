@@ -52,7 +52,7 @@ if %ERRORLEVEL% equ 0 (
     echo.
     echo %APP_NAME%.exe is ready!
     echo To run: Double-click %APP_NAME%.exe
-    echo Downloads will be saved to: Documents\TrustDrop Downloads\data\received
+    echo Downloads will be saved to: Documents\TrustDrop Downloads\received
     echo.
     echo Installation: Copy %APP_NAME%.exe to desired location
 ) else (

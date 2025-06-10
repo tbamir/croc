@@ -103,17 +103,8 @@ func NewBulletproofTransferManager(targetDataDir string) (*BulletproofTransferMa
 	fmt.Printf("Creating advanced security...\n")
 	advancedSecurity := security.NewAdvancedSecurity()
 
-	fmt.Printf("Creating blockchain...\n")
-	blockchain, err := blockchain.NewBlockchain(targetDataDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize blockchain: %w", err)
-	}
-
-	fmt.Printf("Creating logger...\n")
-	logger, err := logging.NewLogger(targetDataDir, "bulletproof_transfers.log")
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize logger: %w", err)
-	}
+	// Skip blockchain and logging for clean user experience
+	fmt.Printf("Skipping blockchain and logging for clean experience...\n")
 
 	// Create context for cancellation
 	ctx, cancel := context.WithCancel(context.Background())
@@ -121,8 +112,8 @@ func NewBulletproofTransferManager(targetDataDir string) (*BulletproofTransferMa
 	btm := &BulletproofTransferManager{
 		transportManager: transportManager,
 		advancedSecurity: advancedSecurity,
-		blockchain:       blockchain,
-		logger:           logger,
+		blockchain:       nil, // Disabled for clean experience
+		logger:           nil, // Disabled for clean experience
 		targetDataDir:    targetDataDir,
 		maxRetries:       5, // Reduced from 10
 		retryDelay:       2 * time.Second,
@@ -701,6 +692,11 @@ func (btm *BulletproofTransferManager) calculateRetryDelay(attempt int, strategy
 }
 
 func (btm *BulletproofTransferManager) recordTransferInBlockchain(result *TransferResult, transferCode string) error {
+	// Skip blockchain recording for clean experience
+	if btm.blockchain == nil {
+		return nil
+	}
+
 	entry := blockchain.TransferEntry{
 		TransferCode: transferCode,
 		Timestamp:    time.Now(),
@@ -720,7 +716,10 @@ func (btm *BulletproofTransferManager) updateProgress(current, total int64, file
 }
 
 func (btm *BulletproofTransferManager) updateStatus(status string) {
-	btm.logger.LogInfo(status)
+	// Only log if logger is available
+	if btm.logger != nil {
+		btm.logger.LogInfo(status)
+	}
 	if btm.statusCallback != nil {
 		btm.statusCallback(status)
 	}
@@ -766,8 +765,11 @@ func (btm *BulletproofTransferManager) Close() error {
 		errors = append(errors, err)
 	}
 
-	if err := btm.logger.Close(); err != nil {
-		errors = append(errors, err)
+	// Only close logger if it exists
+	if btm.logger != nil {
+		if err := btm.logger.Close(); err != nil {
+			errors = append(errors, err)
+		}
 	}
 
 	if len(errors) > 0 {

@@ -9,39 +9,22 @@ import (
 	"time"
 )
 
-// EnsureDataDirectory creates the data directory structure if it doesn't exist
+// EnsureDataDirectory creates only the essential received directory
 func EnsureDataDirectory() error {
-	dirs := []string{
-		"data",
-		"data/received",
-		"data/temp",
-		"logs",
+	// Only create the received folder - no extra clutter
+	if err := os.MkdirAll("received", 0755); err != nil {
+		return fmt.Errorf("failed to create received directory: %w", err)
 	}
-
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", dir, err)
-		}
-	}
-
 	return nil
 }
 
-// EnsureDataDirectoryAtPath creates the data directory structure at a specific path
+// EnsureDataDirectoryAtPath creates only the essential received directory at a specific path
 func EnsureDataDirectoryAtPath(basePath string) error {
-	dirs := []string{
-		filepath.Join(basePath, "data"),
-		filepath.Join(basePath, "data", "received"),
-		filepath.Join(basePath, "data", "temp"),
-		filepath.Join(basePath, "logs"),
+	// Only create the received folder - clean and simple
+	receivedDir := filepath.Join(basePath, "received")
+	if err := os.MkdirAll(receivedDir, 0755); err != nil {
+		return fmt.Errorf("failed to create received directory: %w", receivedDir, err)
 	}
-
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", dir, err)
-		}
-	}
-
 	return nil
 }
 
@@ -72,22 +55,22 @@ func FormatDuration(d time.Duration) string {
 
 // GetReceivedFilesPath returns the path where received files are stored
 func GetReceivedFilesPath() string {
-	return filepath.Join("data", "received")
+	return "received"
 }
 
 // GetReceivedFilesPathAtBase returns the path where received files are stored at a specific base path
 func GetReceivedFilesPathAtBase(basePath string) string {
-	return filepath.Join(basePath, "data", "received")
+	return filepath.Join(basePath, "received")
 }
 
-// GetTempPath returns the path for temporary files
+// GetTempPath returns the path for temporary files (now same as received for simplicity)
 func GetTempPath() string {
-	return filepath.Join("data", "temp")
+	return "received"
 }
 
-// GetTempPathAtBase returns the path for temporary files at a specific base path
+// GetTempPathAtBase returns the path for temporary files at a specific base path (now same as received)
 func GetTempPathAtBase(basePath string) string {
-	return filepath.Join(basePath, "data", "temp")
+	return filepath.Join(basePath, "received")
 }
 
 // FileExists checks if a file exists
