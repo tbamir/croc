@@ -34,6 +34,7 @@ type BulletproofTransferManager struct {
 	processedSize    int64
 	progressCallback func(int64, int64, string)
 	statusCallback   func(string)
+	lastTransferMeta *transport.TransferMetadata // Store metadata for filename preservation
 
 	// Reliability features
 	maxRetries      int
@@ -259,6 +260,9 @@ func (btm *BulletproofTransferManager) ReceiveFiles(transferCode string) (*Trans
 		TransferID: transferCode,
 	}
 
+	// Store metadata for filename preservation
+	btm.lastTransferMeta = &metadata
+
 	btm.updateStatus("Attempting to receive files through all available transports...")
 
 	// Try to receive with automatic failover
@@ -267,8 +271,8 @@ func (btm *BulletproofTransferManager) ReceiveFiles(transferCode string) (*Trans
 		return nil, fmt.Errorf("failed to receive files: %w", err)
 	}
 
-	// Process received data
-	receivedFiles, totalBytes, err := btm.processReceivedData(data, transferCode)
+	// Process received data with metadata
+	receivedFiles, totalBytes, err := btm.processReceivedData(data, transferCode, &metadata)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process received data: %w", err)
 	}
@@ -348,7 +352,7 @@ type FileProcessResult struct {
 }
 
 // processReceivedData handles processing of received data and files
-func (btm *BulletproofTransferManager) processReceivedData(encryptedData []byte, transferCode string) ([]string, int64, error) {
+func (btm *BulletproofTransferManager) processReceivedData(encryptedData []byte, transferCode string, metadata *transport.TransferMetadata) ([]string, int64, error) {
 	// Decrypt data with all available modes
 	var decryptedData []byte
 	var err error
@@ -384,9 +388,14 @@ func (btm *BulletproofTransferManager) processReceivedData(encryptedData []byte,
 		// It's a file manifest (multiple files or folder)
 		return btm.processFileManifest(manifest, receivedDir, transferCode)
 	} else {
-		// It's a single file
+		// It's a single file - preserve original filename
 		filename := fmt.Sprintf("received_file_%d", time.Now().Unix())
-		if btm.transferID != "" {
+
+		// Use filename from metadata if available
+		if metadata != nil && metadata.FileName != "" {
+			filename = metadata.FileName
+		} else if btm.transferID != "" {
+			// Fallback: use transfer ID
 			filename = fmt.Sprintf("file_%s", btm.transferID)
 		}
 

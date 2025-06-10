@@ -30,8 +30,8 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-const NbPinNumbers = 4
-const NbBytesWords = 4
+const NbPinNumbers = 6
+const NbBytesWords = 8
 
 // Get or create home directory
 func GetConfigDir(requireValidPath bool) (homedir string, err error) {
@@ -295,13 +295,20 @@ func GenerateRandomPin() string {
 	return s
 }
 
-// GetRandomName returns mnemonicoded random name
+// GetRandomName returns mnemonicoded random name with enhanced security
 func GetRandomName() string {
 	var result []string
 	bs := make([]byte, NbBytesWords)
 	rand.Read(bs)
 	result = mnemonicode.EncodeWordList(result, bs)
-	return GenerateRandomPin() + "-" + strings.Join(result, "-")
+
+	// Add additional entropy with longer numeric prefix
+	pin := GenerateRandomPin()
+
+	// Mix in timestamp-based entropy (last 3 digits of nanoseconds)
+	nano := time.Now().UnixNano() % 1000
+
+	return fmt.Sprintf("%s%03d-%s", pin, nano, strings.Join(result, "-"))
 }
 
 // ByteCountDecimal converts bytes to human readable byte string
