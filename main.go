@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/widget"
@@ -15,52 +14,48 @@ import (
 )
 
 func main() {
-	// Determine target data directory based on platform and context
+	// Create TrustDrop Downloads folder in user's Documents or Desktop
 	var targetDataDir string
 	var err error
 
-	if runtime.GOOS == "darwin" {
-		// macOS: Check if running from app bundle
-		executablePath, err := os.Executable()
-		if err != nil {
-			fmt.Printf("Error getting executable path: %v\n", err)
-			targetDataDir = "."
+	// Get user's home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Printf("Warning: Could not get user home directory: %v\n", err)
+		targetDataDir = "."
+	} else {
+		// Try Documents first, then Desktop as fallback
+		documentsDir := filepath.Join(homeDir, "Documents", "TrustDrop Downloads")
+		if err := os.MkdirAll(documentsDir, 0755); err == nil {
+			targetDataDir = documentsDir
 		} else {
-			// Check if running from within app bundle
-			if filepath.Dir(executablePath) == "/Applications/TrustDrop.app/Contents/MacOS" ||
-				filepath.Base(filepath.Dir(filepath.Dir(executablePath))) == "Contents" {
-				// Running from app bundle - use Desktop
-				homeDir, err := os.UserHomeDir()
-				if err != nil {
-					targetDataDir = "."
-				} else {
-					targetDataDir = filepath.Join(homeDir, "Desktop", "TrustDrop")
-				}
+			// Fallback to Desktop
+			desktopDir := filepath.Join(homeDir, "Desktop", "TrustDrop Downloads")
+			if err := os.MkdirAll(desktopDir, 0755); err == nil {
+				targetDataDir = desktopDir
 			} else {
-				// Running from development or terminal - use current directory
+				// Final fallback to current directory
+				fmt.Printf("Warning: Could not create TrustDrop Downloads folder: %v\n", err)
 				targetDataDir = "."
 			}
 		}
-	} else {
-		// Windows and other platforms - use current directory
-		targetDataDir = "."
 	}
 
-	// Ensure the data directory exists
+	// Ensure the data directory structure exists
 	err = internal.EnsureDataDirectoryAtPath(targetDataDir)
 	if err != nil {
 		fmt.Printf("Error creating data directory: %v\n", err)
 		targetDataDir = "." // Fallback to current directory
 	}
 
-	fmt.Printf("TrustDrop Bulletproof Edition starting...\n")
-	fmt.Printf("Data directory: %s\n", targetDataDir)
+	fmt.Printf("🚀 TrustDrop starting...\n")
+	fmt.Printf("📂 Downloads will be saved to: %s\n", filepath.Join(targetDataDir, "data", "received"))
 
 	// Initialize bulletproof transfer manager
-	fmt.Printf("Initializing bulletproof transfer manager...\n")
+	fmt.Printf("⚙️  Initializing transfer manager...\n")
 	transferManager, err := transfer.NewBulletproofTransferManager(targetDataDir)
 	if err != nil {
-		fmt.Printf("Failed to initialize bulletproof transfer manager: %v\n", err)
+		fmt.Printf("❌ Failed to initialize transfer manager: %v\n", err)
 		// Fallback to basic GUI without bulletproof features
 		basicApp := app.New()
 		basicWindow := basicApp.NewWindow("TrustDrop - Error")
@@ -70,26 +65,28 @@ func main() {
 	}
 	defer transferManager.Close()
 
-	fmt.Printf("Transfer manager initialized successfully\n")
+	fmt.Printf("✅ Transfer manager ready\n")
 
 	// Create and run GUI with bulletproof manager
-	fmt.Printf("Creating GUI...\n")
+	fmt.Printf("🎨 Creating GUI...\n")
 	bulletproofApp := gui.NewAppWithBulletproofManager(transferManager, targetDataDir)
 	if bulletproofApp == nil {
-		fmt.Printf("Failed to create GUI application\n")
+		fmt.Printf("❌ Failed to create GUI application\n")
 		return
 	}
 
-	fmt.Printf("GUI created successfully\n")
+	fmt.Printf("✅ GUI ready\n")
 
 	// Display network status
-	fmt.Printf("Getting network status...\n")
 	networkStatus := transferManager.GetNetworkStatus()
-	fmt.Printf("Network Analysis Complete:\n")
-	fmt.Printf("- Network Profile: %+v\n", networkStatus["network_profile"])
-	fmt.Printf("- Available Transports: %+v\n", networkStatus["transport_status"])
+	fmt.Printf("🌐 Network Status:\n")
+	if transportStatus, ok := networkStatus["transport_status"].(map[string]interface{}); ok {
+		fmt.Printf("   Available Transports: %d\n", len(transportStatus))
+	}
+
+	fmt.Printf("🎉 TrustDrop is ready!\n")
+	fmt.Printf("📋 Your downloads will be saved to:\n   %s\n", filepath.Join(targetDataDir, "data", "received"))
 
 	// Run the application
-	fmt.Printf("Starting GUI...\n")
 	bulletproofApp.Run()
 }
