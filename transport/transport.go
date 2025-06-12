@@ -125,21 +125,15 @@ func NewMultiTransportManager(config TransportConfig) (*MultiTransportManager, e
 func (mtm *MultiTransportManager) initializeTransports() error {
 	var initErrors []string
 
-	// HTTPS LOCAL RELAY transport first - works through ALL corporate firewalls
-	httpsTransport := &HTTPSTunnelTransport{priority: 100} // Highest priority
-	if err := httpsTransport.Setup(mtm.config); err == nil {
-		mtm.transports = append(mtm.transports, httpsTransport)
-		fmt.Printf("HTTPS local relay transport initialized (priority: %d)\n", httpsTransport.GetPriority())
-	} else {
-		initErrors = append(initErrors, fmt.Sprintf("HTTPS-Local-Relay: %v", err))
-		fmt.Printf("Warning: HTTPS local relay failed to initialize: %v\n", err)
-	}
+	// TEMPORARILY DISABLE HTTPS LOCAL RELAY - it has cross-machine communication issues
+	// Will re-enable once fixed to work across network
+	fmt.Printf("Note: HTTPS local relay temporarily disabled due to cross-machine communication issues\n")
 
-	// Initialize Enhanced Croc transport (lower priority than HTTPS for corporate safety)
-	crocTransport := NewCrocTransport(85) // Lower than HTTPS
+	// Initialize Enhanced Croc transport as PRIMARY (highest priority for now)
+	crocTransport := NewCrocTransport(100) // Highest priority temporarily
 	if err := crocTransport.Setup(mtm.config); err == nil {
 		mtm.transports = append(mtm.transports, crocTransport)
-		fmt.Printf("Enhanced CROC transport initialized (priority: %d)\n", crocTransport.GetPriority())
+		fmt.Printf("Enhanced CROC transport initialized as PRIMARY (priority: %d)\n", crocTransport.GetPriority())
 	} else {
 		initErrors = append(initErrors, fmt.Sprintf("Enhanced-CROC: %v", err))
 		fmt.Printf("Warning: Enhanced CROC failed to initialize: %v\n", err)
@@ -172,7 +166,7 @@ func (mtm *MultiTransportManager) initializeTransports() error {
 
 	// Log successful initialization
 	fmt.Printf("Transport manager ready with %d/%d transports successfully initialized\n",
-		len(mtm.transports), len(transportsToInit)+2)
+		len(mtm.transports), len(transportsToInit)+1) // +1 for CROC
 
 	if len(initErrors) > 0 {
 		fmt.Printf("Some transports failed to initialize (will continue with available ones): %s\n",
@@ -914,23 +908,24 @@ func (mtm *MultiTransportManager) getEffectivePriority(transport Transport) int 
 	basePriority := transport.GetPriority()
 	transportName := transport.GetName()
 
-	// HTTPS tunnel always gets highest priority for institutional networks
-	if transportName == "https-tunnel" {
-		if mtm.networkProfile.IsRestrictive {
-			return basePriority + 50 // Massive boost for restrictive networks
-		} else {
-			return basePriority + 10 // Still preferred for reliability
+	// Enhanced CROC gets highest priority (HTTPS local relay temporarily disabled)
+	if transportName == "enhanced-croc" {
+		return basePriority + 20 // High boost for CROC
+	}
+
+	// Reduce priorities for other transports to ensure CROC is preferred
+	if transportName == "https-tunnel" || transportName == "https-local-relay" {
+		return basePriority - 50 // Lower priority until HTTPS cross-machine issues are fixed
+	}
+
+	// Apply success/failure history
+	if successCount, exists := mtm.successHistory[transportName]; exists {
+		if successCount > 0 {
+			return basePriority + (successCount * 5) // Boost based on success history
 		}
 	}
 
-	// Reduce CROC priority in restrictive networks
-	if transportName == "enhanced-croc" && mtm.networkProfile.IsRestrictive {
-		return basePriority - 30
-	}
-
-	// Factor in success history
-	successCount := mtm.successHistory[transportName]
-	return basePriority + successCount
+	return basePriority
 }
 
 // GetNetworkProfile returns the analyzed network profile
