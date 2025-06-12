@@ -178,17 +178,22 @@ fi
 if [ ! -z "$SIGNING_IDENTITY" ]; then
     echo -e "${BLUE}🔐 Code signing with: ${SIGNING_IDENTITY}${NC}"
     
-    # Sign the main executable first
-    codesign --force --sign "${SIGNING_IDENTITY}" \
+    # Sign the main executable first with timeout
+    timeout 10 codesign --force --sign "${SIGNING_IDENTITY}" \
         "build/${APP_NAME}.app/Contents/MacOS/${APP_NAME}" >/dev/null 2>&1
+    EXEC_SIGN_RESULT=$?
     
-    # Then sign the entire app bundle
-    codesign --force --sign "${SIGNING_IDENTITY}" \
+    # Then sign the entire app bundle with timeout
+    timeout 10 codesign --force --sign "${SIGNING_IDENTITY}" \
         "build/${APP_NAME}.app" >/dev/null 2>&1
+    APP_SIGN_RESULT=$?
     
-    if [ $? -eq 0 ]; then
+    if [ $EXEC_SIGN_RESULT -eq 0 ] && [ $APP_SIGN_RESULT -eq 0 ]; then
         echo -e "${GREEN}✅ Code signing successful!${NC}"
         echo -e "${GREEN}🎉 App should NOT require quarantine removal${NC}"
+    elif [ $EXEC_SIGN_RESULT -eq 124 ] || [ $APP_SIGN_RESULT -eq 124 ]; then
+        echo -e "${YELLOW}⚠️  Code signing timed out (keychain access may be required)${NC}"
+        echo -e "${YELLOW}⚠️  App may require quarantine removal${NC}"
     else
         echo -e "${YELLOW}⚠️  Code signing failed, app may require quarantine removal${NC}"
     fi
