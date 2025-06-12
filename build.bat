@@ -56,14 +56,9 @@ if exist "image.png" (
         del temp16.png temp32.png temp48.png temp64.png temp128.png temp256.png >nul 2>nul
         echo Windows icon (.ico) created successfully
     ) else (
-        echo ImageMagick not found, trying alternative method...
-        REM Try using PowerShell as fallback
-        powershell -command "Add-Type -AssemblyName System.Drawing; $img = [System.Drawing.Image]::FromFile('image.png'); $ico = [System.Drawing.Icon]::FromHandle($img.GetHIcon()); $ico.Save('icon.ico'); $img.Dispose()"
-        if exist "icon.ico" (
-            echo Windows icon created with PowerShell
-        ) else (
-            echo Icon conversion failed, continuing without icon
-        )
+        echo ImageMagick not found, skipping icon creation for now...
+        echo You can manually convert image.png to icon.ico if needed
+        copy image.png icon.png >nul 2>nul
     )
 ) else (
     echo PNG icon not found, skipping icon creation
