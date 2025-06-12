@@ -126,7 +126,7 @@ func (ba *BulletproofApp) Run() {
 
 // setupUI creates the complete user interface with enhanced network awareness
 func (ba *BulletproofApp) setupUI() {
-	ba.window = ba.app.NewWindow("TrustDrop Bulletproof Edition")
+	ba.window = ba.app.NewWindow("TrustDrop")
 	ba.window.Resize(fyne.NewSize(560, 500)) // Larger for network status
 	ba.window.CenterOnScreen()
 
