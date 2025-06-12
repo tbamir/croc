@@ -19,6 +19,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"trustdrop-bulletproof/assets"
 	"trustdrop-bulletproof/src/utils"
 	"trustdrop-bulletproof/transfer"
 	"trustdrop-bulletproof/transport"
@@ -128,6 +129,10 @@ func (ba *BulletproofApp) setupUI() {
 	ba.window = ba.app.NewWindow("TrustDrop Bulletproof Edition")
 	ba.window.Resize(fyne.NewSize(560, 500)) // Larger for network status
 	ba.window.CenterOnScreen()
+
+	// Set the app icon from embedded assets
+	ba.app.SetIcon(assets.GetAppIcon())
+	ba.window.SetIcon(assets.GetAppIcon())
 
 	// Create all views
 	ba.createMainView()
