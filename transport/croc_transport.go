@@ -14,12 +14,46 @@ import (
 type SimpleCrocTransport struct {
 	priority int
 	config   TransportConfig
+	options  croc.Options
 }
 
-// Setup initializes the simple croc transport
+// Setup initializes the CROC transport with international relay configuration
 func (t *SimpleCrocTransport) Setup(config TransportConfig) error {
 	t.config = config
-	fmt.Printf("Simple CROC transport setup completed\n")
+	t.priority = 60 // Lower priority, but very reliable for large files
+
+	// Corporate/University optimized configuration
+	t.options = croc.Options{
+		IsSender:         false, // Will be set dynamically
+		SharedSecret:     "",    // Will be set per transfer
+		Debug:            false,
+		RelayAddress:     "croc.schollz.com",                                            // International relay server
+		RelayAddress6:    "",                                                            // IPv6 disabled for corporate compatibility
+		RelayPorts:       []string{"443", "80", "9009", "9010", "9011", "9012", "9013"}, // Corporate-friendly ports FIRST
+		RelayPassword:    "",
+		Stdout:           false,
+		NoPrompt:         true,  // Non-interactive for automation
+		NoMultiplexing:   false, // Allow multiplexing for speed
+		DisableLocal:     true,  // Force relay usage (no local P2P) - CRITICAL for corporate
+		OnlyLocal:        false,
+		IgnoreStdin:      true,
+		Ask:              false,
+		SendingText:      false,
+		NoCompress:       false, // Enable compression for large files
+		IP:               "",
+		Overwrite:        true,
+		Curve:            "siec", // Secure curve
+		HashAlgorithm:    "xxhash",
+		ThrottleUpload:   "",
+		ZipFolder:        false,
+		TestFlag:         false,
+		GitIgnore:        false,
+		MulticastAddress: "",
+		ShowQrCode:       false,
+		Exclude:          []string{},
+	}
+
+	fmt.Println("Simple CROC transport setup completed")
 	return nil
 }
 

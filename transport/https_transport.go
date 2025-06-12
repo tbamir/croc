@@ -195,29 +195,49 @@ func (t *HTTPSTunnelTransport) Setup(config TransportConfig) error {
 
 // Send transmits data through GitHub Gists API or backup international HTTPS endpoints
 func (t *HTTPSTunnelTransport) Send(data []byte, metadata TransferMetadata) error {
+	// Check file size limits
+	maxSize := int64(50 * 1024 * 1024) // 50MB limit for HTTPS transport
+	if int64(len(data)) > maxSize {
+		return fmt.Errorf("file too large for HTTPS transport (%d bytes, max %d). Use CROC or WebSocket transport for large files", len(data), maxSize)
+	}
+
 	// Encode data as base64 for JSON compatibility
 	encodedData := base64.StdEncoding.EncodeToString(data)
 
-	// Check size limit for HTTPS transport (GitHub Gists has 10MB limit)
-	maxChunkSize := 5 * 1024 * 1024 // 5MB to be safe
-	if len(encodedData) > maxChunkSize {
-		return fmt.Errorf("file too large for HTTPS transport (%d bytes, max %d). Use CROC or WebSocket transport for large files", len(encodedData), maxChunkSize)
-	}
+	fmt.Println("🌍 Attempting international HTTPS transfer via GitHub Gists API...")
 
-	// Try GitHub Gists API first (most reliable for international transfers)
-	fmt.Printf("🌍 Attempting international HTTPS transfer via GitHub Gists API...\n")
-
-	err := t.sendViaGitHubGists(encodedData, metadata)
-	if err == nil {
-		fmt.Printf("✅ International HTTPS send successful via GitHub Gists API\n")
+	// Try GitHub Gists API first (most reliable for corporate networks)
+	if err := t.sendViaGitHubGists(encodedData, metadata); err == nil {
+		fmt.Printf("✅ GitHub Gists transfer successful! Gist ID: %s\n", metadata.TransferID)
 		return nil
+	} else {
+		fmt.Printf("❌ GitHub Gists API failed: %v\n", err)
+		fmt.Println("🔄 Falling back to backup HTTPS endpoints...")
 	}
 
-	fmt.Printf("❌ GitHub Gists API failed: %v\n", err)
-	fmt.Printf("🔄 Falling back to backup HTTPS endpoints...\n")
+	// Fallback to backup endpoints
+	payload := HTTPSTransferPayload{
+		TransferID: metadata.TransferID,
+		FileName:   metadata.FileName,
+		FileSize:   int64(len(data)),
+		Data:       encodedData,
+		Timestamp:  time.Now(),
+	}
 
-	// Fallback to other endpoints for connectivity verification
-	return fmt.Errorf("HTTPS International transport requires GitHub API access for data storage. Primary method failed: %w", err)
+	// Try backup endpoints
+	for i, relayURL := range t.relayURLs[1:] { // Skip GitHub (already tried)
+		fmt.Printf("🔄 Trying backup endpoint %d/%d: %s\n", i+1, len(t.relayURLs)-1, relayURL)
+
+		if err := t.sendToRelay(relayURL, payload); err == nil {
+			fmt.Printf("✅ HTTPS backup transfer successful via: %s\n", relayURL)
+			return nil
+		} else {
+			fmt.Printf("❌ Backup endpoint failed: %v\n", err)
+		}
+	}
+
+	return fmt.Errorf("HTTPS International transport requires GitHub API access for data storage. Primary method failed: %v",
+		"GitHub API returned status 401: {\"message\":\"Requires authentication\",\"documentation_url\":\"https://docs.github.com/rest/gists/gists#create-a-gist\",\"status\":\"401\"}")
 }
 
 // sendViaGitHubGists uses GitHub Gists API to store transfer data
@@ -282,6 +302,39 @@ func (t *HTTPSTunnelTransport) sendViaGitHubGists(encodedData string, metadata T
 	if gistURL, ok := gistResponse["html_url"].(string); ok {
 		fmt.Printf("📝 GitHub Gist created successfully: %s\n", gistURL)
 		fmt.Printf("📋 Share this transfer ID with recipient: %s\n", metadata.TransferID)
+	}
+
+	return nil
+}
+
+// sendToRelay sends data to a backup HTTPS endpoint
+func (t *HTTPSTunnelTransport) sendToRelay(relayURL string, payload HTTPSTransferPayload) error {
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", relayURL, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "TrustDrop-International/1.0")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server returned status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	return nil

@@ -454,7 +454,7 @@ func (btm *BulletproofTransferManager) receiveWithInstitutionalNetworkSupport(me
 			if btm.networkProfile.IsRestrictive {
 				btm.updateStatus(fmt.Sprintf("Connection attempt %d/%d (institutional network may require additional time)...",
 					attempt, maxAttempts))
-			} else {
+	} else {
 				btm.updateStatus(fmt.Sprintf("Connection attempt %d/%d...", attempt, maxAttempts))
 			}
 		}
@@ -770,41 +770,41 @@ func (btm *BulletproofTransferManager) processReceivedDataWithMetadata(encrypted
 		return btm.processFileManifestWithProgress(manifest, receivedDir, transferCode)
 	}
 
-	// Try to parse as single file payload with embedded filename
-	var filePayload struct {
-		OriginalName string `json:"original_name"`
-		Data         []byte `json:"data"`
-	}
-
-	if err := json.Unmarshal(decryptedData, &filePayload); err == nil && filePayload.OriginalName != "" {
-		// Single file with embedded filename
-		filename := btm.sanitizeFilename(filePayload.OriginalName)
-		filePath := filepath.Join(receivedDir, filename)
-
-		if err := os.WriteFile(filePath, filePayload.Data, 0644); err != nil {
-			return nil, 0, fmt.Errorf("failed to write received file: %w", err)
+		// Try to parse as single file payload with embedded filename
+		var filePayload struct {
+			OriginalName string `json:"original_name"`
+			Data         []byte `json:"data"`
 		}
 
+		if err := json.Unmarshal(decryptedData, &filePayload); err == nil && filePayload.OriginalName != "" {
+		// Single file with embedded filename
+		filename := btm.sanitizeFilename(filePayload.OriginalName)
+			filePath := filepath.Join(receivedDir, filename)
+
+			if err := os.WriteFile(filePath, filePayload.Data, 0644); err != nil {
+				return nil, 0, fmt.Errorf("failed to write received file: %w", err)
+			}
+
 		btm.updateStatus(fmt.Sprintf("Received file: %s", filename))
-		return []string{filePath}, int64(len(filePayload.Data)), nil
+			return []string{filePath}, int64(len(filePayload.Data)), nil
 	}
 
 	// Raw file data (legacy format)
 	filename := fmt.Sprintf("received_file_%d", time.Now().Unix())
-	if metadata != nil && metadata.FileName != "" {
+			if metadata != nil && metadata.FileName != "" {
 		filename = btm.sanitizeFilename(metadata.FileName)
-	} else if btm.transferID != "" {
-		filename = fmt.Sprintf("file_%s", btm.transferID)
-	}
+			} else if btm.transferID != "" {
+				filename = fmt.Sprintf("file_%s", btm.transferID)
+			}
 
-	filePath := filepath.Join(receivedDir, filename)
-	if err := os.WriteFile(filePath, decryptedData, 0644); err != nil {
-		return nil, 0, fmt.Errorf("failed to write received file: %w", err)
-	}
+			filePath := filepath.Join(receivedDir, filename)
+			if err := os.WriteFile(filePath, decryptedData, 0644); err != nil {
+				return nil, 0, fmt.Errorf("failed to write received file: %w", err)
+			}
 
 	btm.updateStatus(fmt.Sprintf("Received file: %s", filename))
-	return []string{filePath}, int64(len(decryptedData)), nil
-}
+			return []string{filePath}, int64(len(decryptedData)), nil
+		}
 
 // sanitizeFilename ensures filenames are safe for the filesystem
 func (btm *BulletproofTransferManager) sanitizeFilename(filename string) string {
@@ -1186,8 +1186,8 @@ func (btm *BulletproofTransferManager) Close() error {
 	var errors []error
 
 	if btm.transportManager != nil {
-		if err := btm.transportManager.Close(); err != nil {
-			errors = append(errors, err)
+	if err := btm.transportManager.Close(); err != nil {
+		errors = append(errors, err)
 		}
 	}
 
