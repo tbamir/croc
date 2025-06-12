@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// WebSocketTransport provides file transfer through WebSocket connections
+// WebSocketTransport provides WebSocket-based file transfer
 type WebSocketTransport struct {
 	priority int
 	config   TransportConfig
@@ -14,7 +14,7 @@ type WebSocketTransport struct {
 // Setup initializes the WebSocket transport
 func (t *WebSocketTransport) Setup(config TransportConfig) error {
 	t.config = config
-	t.priority = 7
+	t.priority = 40
 	return nil
 }
 

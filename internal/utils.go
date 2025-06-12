@@ -23,7 +23,7 @@ func EnsureDataDirectoryAtPath(basePath string) error {
 	// Only create the received folder - clean and simple
 	receivedDir := filepath.Join(basePath, "received")
 	if err := os.MkdirAll(receivedDir, 0755); err != nil {
-		return fmt.Errorf("failed to create received directory: %w", receivedDir, err)
+		return fmt.Errorf("failed to create received directory %s: %w", receivedDir, err)
 	}
 	return nil
 }
