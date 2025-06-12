@@ -139,14 +139,16 @@ func (mtm *MultiTransportManager) initializeTransports() error {
 		fmt.Printf("Warning: Enhanced CROC failed to initialize: %v\n", err)
 	}
 
-	// Initialize fallback transports with error handling
+	// TEMPORARILY DISABLE unimplemented transports to avoid confusion
+	fmt.Printf("Note: WebSocket and DirectP2P transports temporarily disabled (not implemented)\n")
+
+	// Initialize only working fallback transports
 	transportsToInit := []struct {
 		name      string
 		transport Transport
 	}{
 		{"Tor", &TorTransport{priority: 75}},
-		{"WebSocket", &WebSocketTransport{priority: 60}},
-		{"DirectP2P", &DirectP2PTransport{priority: 40}},
+		// WebSocket and DirectP2P removed until implemented
 	}
 
 	for _, t := range transportsToInit {
@@ -908,8 +910,8 @@ func (mtm *MultiTransportManager) getEffectivePriority(transport Transport) int 
 	basePriority := transport.GetPriority()
 	transportName := transport.GetName()
 
-	// Enhanced CROC gets highest priority (HTTPS local relay temporarily disabled)
-	if transportName == "enhanced-croc" {
+	// Simple CROC gets highest priority (HTTPS local relay temporarily disabled)
+	if transportName == "simple-croc" {
 		return basePriority + 20 // High boost for CROC
 	}
 

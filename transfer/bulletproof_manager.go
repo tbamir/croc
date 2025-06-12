@@ -141,8 +141,8 @@ func NewBulletproofTransferManager(targetDataDir string) (*BulletproofTransferMa
 		adaptiveSettings: AdaptiveSettings{
 			TimeoutMultiplier:  2.5, // Very conservative for corporate networks
 			ChunkSizeBytes:     4 * 1024 * 1024,
-			MaxConcurrentFiles: 1,               // Ultra-conservative for corporate stability
-			PreferredTransport: "enhanced-croc", // Use CROC as primary (HTTPS local relay temporarily disabled)
+			MaxConcurrentFiles: 1,             // Ultra-conservative for corporate stability
+			PreferredTransport: "simple-croc", // Use simple CROC as primary
 			RetryStrategy: RetryStrategy{
 				MaxAttempts:   15, // Increased for corporate network reliability
 				InitialDelay:  8 * time.Second,
@@ -167,7 +167,7 @@ func (btm *BulletproofTransferManager) initializeNetworkMonitoring() {
 		IsRestrictive:      true, // Assume restrictive until proven otherwise
 		AvailablePorts:     []int{80, 443},
 		NetworkType:        "institutional",
-		PreferredTransport: "enhanced-croc", // Use CROC as primary (HTTPS local relay temporarily disabled)
+		PreferredTransport: "simple-croc", // Use simple CROC as primary
 	}
 
 	// Start network analysis in background
