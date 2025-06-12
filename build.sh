@@ -154,53 +154,10 @@ EOF
 # Make binary executable
 chmod +x "build/${APP_NAME}.app/Contents/MacOS/${APP_NAME}"
 
-# Try to code sign the app to avoid quarantine issues
-echo -e "${YELLOW}🔐 Attempting to code sign app...${NC}"
-SIGNING_IDENTITY=""
-
-# Check for available signing identities
-if command -v security >/dev/null 2>&1; then
-    # Look for Developer ID Application certificates
-    DEVELOPER_CERTS=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1)
-    if [ ! -z "$DEVELOPER_CERTS" ]; then
-        SIGNING_IDENTITY=$(echo "$DEVELOPER_CERTS" | sed 's/.*"\(.*\)".*/\1/')
-        echo -e "${GREEN}📝 Found Developer ID: ${SIGNING_IDENTITY}${NC}"
-    else
-        # Look for any valid codesigning certificate
-        ANY_CERT=$(security find-identity -v -p codesigning | grep -E "(iPhone|Apple|Developer|Mac)" | head -1)
-        if [ ! -z "$ANY_CERT" ]; then
-            SIGNING_IDENTITY=$(echo "$ANY_CERT" | sed 's/.*"\(.*\)".*/\1/')
-            echo -e "${YELLOW}📝 Using certificate: ${SIGNING_IDENTITY}${NC}"
-        fi
-    fi
-fi
-
-if [ ! -z "$SIGNING_IDENTITY" ]; then
-    echo -e "${BLUE}🔐 Code signing with: ${SIGNING_IDENTITY}${NC}"
-    
-    # Sign the main executable first with timeout
-    timeout 10 codesign --force --sign "${SIGNING_IDENTITY}" \
-        "build/${APP_NAME}.app/Contents/MacOS/${APP_NAME}" >/dev/null 2>&1
-    EXEC_SIGN_RESULT=$?
-    
-    # Then sign the entire app bundle with timeout
-    timeout 10 codesign --force --sign "${SIGNING_IDENTITY}" \
-        "build/${APP_NAME}.app" >/dev/null 2>&1
-    APP_SIGN_RESULT=$?
-    
-    if [ $EXEC_SIGN_RESULT -eq 0 ] && [ $APP_SIGN_RESULT -eq 0 ]; then
-        echo -e "${GREEN}✅ Code signing successful!${NC}"
-        echo -e "${GREEN}🎉 App should NOT require quarantine removal${NC}"
-    elif [ $EXEC_SIGN_RESULT -eq 124 ] || [ $APP_SIGN_RESULT -eq 124 ]; then
-        echo -e "${YELLOW}⚠️  Code signing timed out (keychain access may be required)${NC}"
-        echo -e "${YELLOW}⚠️  App may require quarantine removal${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Code signing failed, app may require quarantine removal${NC}"
-    fi
-else
-    echo -e "${YELLOW}⚠️  No code signing certificate found${NC}"
-    echo -e "${YELLOW}⚠️  App may trigger quarantine and require manual removal${NC}"
-fi
+# Skip code signing to avoid hanging issues
+echo -e "${YELLOW}🔐 Skipping code signing to ensure build completion...${NC}"
+echo -e "${YELLOW}⚠️  App will require quarantine removal on first run${NC}"
+echo -e "${BLUE}💡 To remove quarantine: sudo xattr -d com.apple.quarantine TrustDrop.app${NC}"
 
 # Move final app bundle to root directory
 echo -e "${YELLOW}📦 Finalizing app bundle...${NC}"
@@ -228,12 +185,10 @@ echo -e "${BLUE}   2. Double-click to run${NC}"
 echo -e "${BLUE}   3. Downloads saved to: ~/Documents/TrustDrop Downloads/${NC}"
 echo ""
 
-if [ -z "$SIGNING_IDENTITY" ]; then
-    echo -e "${YELLOW}⚠️  QUARANTINE FIX (if needed):${NC}"
-    echo -e "${YELLOW}   If macOS says app is damaged, run:${NC}"
-    echo -e "${YELLOW}   sudo xattr -d com.apple.quarantine $(pwd)/${APP_NAME}.app${NC}"
-    echo ""
-fi
+echo -e "${YELLOW}⚠️  QUARANTINE FIX (required):${NC}"
+echo -e "${YELLOW}   If macOS says app is damaged, run:${NC}"
+echo -e "${YELLOW}   sudo xattr -d com.apple.quarantine $(pwd)/${APP_NAME}.app${NC}"
+echo ""
 
 echo -e "${PURPLE}🚀 Ready for GitHub Release! 🚀${NC}"
 echo -e "${PURPLE}Upload ${APP_NAME}.app to your GitHub release${NC}"
