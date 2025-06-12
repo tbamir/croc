@@ -49,7 +49,7 @@ func (t *TorTransport) Setup(config TransportConfig) error {
 	if t.torProxy == "" {
 		// Try to start Tor
 		if err := t.startTor(); err != nil {
-			return fmt.Errorf("Tor not available: %w", err)
+			return fmt.Errorf("tor not available: %w", err)
 		}
 		t.torProxy = "127.0.0.1:9050"
 	}
@@ -81,13 +81,13 @@ func (t *TorTransport) Send(data []byte, metadata TransferMetadata) error {
 
 	// Server would run and provide the file
 	// This is a simplified implementation
-	return fmt.Errorf("Tor send not fully implemented yet")
+	return fmt.Errorf("tor send not fully implemented yet")
 }
 
 // Receive gets data through Tor network
 func (t *TorTransport) Receive(metadata TransferMetadata) ([]byte, error) {
 	if t.httpClient == nil {
-		return nil, fmt.Errorf("Tor HTTP client not initialized")
+		return nil, fmt.Errorf("tor HTTP client not initialized")
 	}
 
 	// Extract hidden service URL from transfer ID
@@ -160,14 +160,14 @@ func (t *TorTransport) startTor() error {
 	// Check if Tor is installed
 	_, err := exec.LookPath("tor")
 	if err != nil {
-		return fmt.Errorf("Tor not installed")
+		return fmt.Errorf("tor not installed")
 	}
 
 	// Start Tor in background
 	cmd := exec.Command("tor", "--quiet", "--SocksPort", "9050")
 	err = cmd.Start()
 	if err != nil {
-		return fmt.Errorf("failed to start Tor: %w", err)
+		return fmt.Errorf("failed to start tor: %w", err)
 	}
 
 	// Wait a bit for Tor to initialize
@@ -180,7 +180,7 @@ func (t *TorTransport) setupHTTPClient() error {
 	// Create SOCKS5 dialer for Tor
 	torDialer, err := proxy.SOCKS5("tcp", t.torProxy, nil, proxy.Direct)
 	if err != nil {
-		return fmt.Errorf("failed to create Tor dialer: %w", err)
+		return fmt.Errorf("failed to create tor dialer: %w", err)
 	}
 
 	// Create HTTP transport with Tor proxy

@@ -313,15 +313,6 @@ func isChild(parentPath, childPath string) bool {
 	return !strings.HasPrefix(relPath, "..")
 }
 
-func recursiveFiles(path string) (paths []string, err error) {
-	paths = []string{strings.ToLower(path)}
-	err = filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-		paths = append(paths, strings.ToLower(path))
-		return nil
-	})
-	return
-}
-
 // This function retrieves the important file information
 // for every file that will be transferred
 func GetFilesInfo(fnames []string, zipfolder bool, ignoreGit bool, exclusions []string) (filesInfo []FileInfo, emptyFolders []FileInfo, totalNumberFolders int, err error) {
@@ -796,8 +787,8 @@ On the other computer run:
 							dataMessage.Bytes = B.Bytes()
 							dataMessage.Kind = "pake2"
 							data, _ = json.Marshal(dataMessage)
-							if pakeError = conn.Send(data); err != nil {
-								log.Errorf("dataMessage error sending: %v", err)
+							if pakeError = conn.Send(data); pakeError != nil {
+								log.Errorf("dataMessage error sending: %v", pakeError)
 							}
 						}
 
@@ -1415,6 +1406,9 @@ func (c *Client) processMessagePake(m message.Message) (err error) {
 			Bytes:  c.Pake.Bytes(),
 			Bytes2: salt,
 		})
+		if err != nil {
+			return err
+		}
 	} else {
 		err = c.Pake.Update(m.Bytes)
 		if err != nil {
@@ -1441,11 +1435,12 @@ func (c *Client) processMessagePake(m message.Message) (err error) {
 		go func(j int) {
 			defer wg.Done()
 			var host string
+			var hostErr error
 			if c.Options.RelayAddress == "127.0.0.1" {
 				host = c.Options.RelayAddress
 			} else {
-				host, _, err = net.SplitHostPort(c.Options.RelayAddress)
-				if err != nil {
+				host, _, hostErr = net.SplitHostPort(c.Options.RelayAddress)
+				if hostErr != nil {
 					log.Errorf("bad relay address %s", c.Options.RelayAddress)
 					return
 				}

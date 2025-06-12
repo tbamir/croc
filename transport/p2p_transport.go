@@ -20,12 +20,12 @@ func (t *DirectP2PTransport) Setup(config TransportConfig) error {
 
 // Send transmits data through direct P2P
 func (t *DirectP2PTransport) Send(data []byte, metadata TransferMetadata) error {
-	return fmt.Errorf("Direct P2P send not implemented yet")
+	return fmt.Errorf("direct P2P send not implemented yet")
 }
 
 // Receive gets data through direct P2P
 func (t *DirectP2PTransport) Receive(metadata TransferMetadata) ([]byte, error) {
-	return nil, fmt.Errorf("Direct P2P receive not implemented yet")
+	return nil, fmt.Errorf("direct P2P receive not implemented yet")
 }
 
 // IsAvailable checks if direct P2P transport is available

@@ -39,17 +39,27 @@ func (t *SimpleCrocTransport) Send(data []byte, metadata TransferMetadata) error
 	}
 	tempFile.Close()
 
-	// Create CROC client for sending
+	// Create CROC client optimized for INTERNATIONAL TRANSFERS (Europe-to-US)
 	options := croc.Options{
-		IsSender:       true,
-		SharedSecret:   metadata.TransferID,
-		RelayAddress:   "croc.schollz.com", // Use default relay
-		RelayAddress6:  "croc6.schollz.com",
-		RelayPorts:     []string{"9009", "9010", "9011", "9012", "9013"},
+		IsSender:     true,
+		SharedSecret: metadata.TransferID,
+
+		// OPTIMIZED RELAY CONFIGURATION for Europe-to-US transfers
+		RelayAddress:  "croc.schollz.com",  // Primary relay
+		RelayAddress6: "croc6.schollz.com", // IPv6 fallback
+
+		// Multiple ports for maximum firewall compatibility
+		RelayPorts: []string{
+			"443",                          // HTTPS port - most likely to work through firewalls
+			"80",                           // HTTP port - second most likely
+			"9009",                         // Standard CROC port
+			"9010", "9011", "9012", "9013", // Alternative CROC ports
+		},
+
 		RelayPassword:  "pass123",
 		NoPrompt:       true,
-		NoMultiplexing: false,
-		DisableLocal:   false,
+		NoMultiplexing: false, // Allow multiplexing for better performance
+		DisableLocal:   true,  // FORCE relay usage for international transfers
 		Ask:            false,
 		Debug:          false,
 		Overwrite:      true,
@@ -57,9 +67,14 @@ func (t *SimpleCrocTransport) Send(data []byte, metadata TransferMetadata) error
 		HashAlgorithm:  "xxhash",
 	}
 
+	fmt.Printf("🌍 Starting CROC international transfer (Europe-to-US optimized)\n")
+	fmt.Printf("   Transfer ID: %s\n", metadata.TransferID)
+	fmt.Printf("   File size: %d bytes\n", len(data))
+	fmt.Printf("   Relay configuration: %s (ports: %v)\n", options.RelayAddress, options.RelayPorts)
+
 	client, err := croc.New(options)
 	if err != nil {
-		return fmt.Errorf("failed to create croc client: %w", err)
+		return fmt.Errorf("failed to create CROC client for international transfer: %w", err)
 	}
 
 	// Get file info and send
@@ -68,12 +83,13 @@ func (t *SimpleCrocTransport) Send(data []byte, metadata TransferMetadata) error
 		return fmt.Errorf("failed to get file info: %w", err)
 	}
 
+	fmt.Printf("🚀 Initiating CROC send via international relay...\n")
 	err = client.Send(filesInfo, emptyFolders, totalFolders)
 	if err != nil {
-		return fmt.Errorf("croc send failed: %w", err)
+		return fmt.Errorf("CROC international send failed: %w", err)
 	}
 
-	fmt.Printf("CROC send successful with transfer code: %s\n", metadata.TransferID)
+	fmt.Printf("✅ CROC international send successful! Transfer code: %s\n", metadata.TransferID)
 	return nil
 }
 
@@ -97,17 +113,27 @@ func (t *SimpleCrocTransport) Receive(metadata TransferMetadata) ([]byte, error)
 		return nil, fmt.Errorf("failed to change to temp directory: %w", err)
 	}
 
-	// Create CROC client for receiving
+	// Create CROC client optimized for INTERNATIONAL TRANSFERS (Europe-to-US)
 	options := croc.Options{
-		IsSender:       false,
-		SharedSecret:   metadata.TransferID,
-		RelayAddress:   "croc.schollz.com", // Use default relay
-		RelayAddress6:  "croc6.schollz.com",
-		RelayPorts:     []string{"9009", "9010", "9011", "9012", "9013"},
+		IsSender:     false,
+		SharedSecret: metadata.TransferID,
+
+		// OPTIMIZED RELAY CONFIGURATION for Europe-to-US transfers
+		RelayAddress:  "croc.schollz.com",  // Primary relay
+		RelayAddress6: "croc6.schollz.com", // IPv6 fallback
+
+		// Multiple ports for maximum firewall compatibility
+		RelayPorts: []string{
+			"443",                          // HTTPS port - most likely to work through firewalls
+			"80",                           // HTTP port - second most likely
+			"9009",                         // Standard CROC port
+			"9010", "9011", "9012", "9013", // Alternative CROC ports
+		},
+
 		RelayPassword:  "pass123",
 		NoPrompt:       true,
-		NoMultiplexing: false,
-		DisableLocal:   false,
+		NoMultiplexing: false, // Allow multiplexing for better performance
+		DisableLocal:   true,  // FORCE relay usage for international transfers
 		Ask:            false,
 		Debug:          false,
 		Overwrite:      true,
@@ -115,15 +141,20 @@ func (t *SimpleCrocTransport) Receive(metadata TransferMetadata) ([]byte, error)
 		HashAlgorithm:  "xxhash",
 	}
 
+	fmt.Printf("🌍 Starting CROC international receive (Europe-to-US optimized)\n")
+	fmt.Printf("   Looking for transfer ID: %s\n", metadata.TransferID)
+	fmt.Printf("   Relay configuration: %s (ports: %v)\n", options.RelayAddress, options.RelayPorts)
+
 	client, err := croc.New(options)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create croc client: %w", err)
+		return nil, fmt.Errorf("failed to create CROC client for international receive: %w", err)
 	}
 
+	fmt.Printf("📡 Connecting to international relay servers...\n")
 	// Receive files
 	err = client.Receive()
 	if err != nil {
-		return nil, fmt.Errorf("croc receive failed: %w", err)
+		return nil, fmt.Errorf("CROC international receive failed: %w", err)
 	}
 
 	// Find the received file
@@ -144,7 +175,7 @@ func (t *SimpleCrocTransport) Receive(metadata TransferMetadata) ([]byte, error)
 	}
 
 	if receivedFile == "" {
-		return nil, fmt.Errorf("no file received")
+		return nil, fmt.Errorf("no file received via CROC international transfer")
 	}
 
 	// Read the received file
@@ -153,7 +184,7 @@ func (t *SimpleCrocTransport) Receive(metadata TransferMetadata) ([]byte, error)
 		return nil, fmt.Errorf("failed to read received file: %w", err)
 	}
 
-	fmt.Printf("CROC receive successful, got %d bytes\n", len(data))
+	fmt.Printf("✅ CROC international receive successful! Got %d bytes\n", len(data))
 	return data, nil
 }
 

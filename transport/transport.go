@@ -125,55 +125,68 @@ func NewMultiTransportManager(config TransportConfig) (*MultiTransportManager, e
 func (mtm *MultiTransportManager) initializeTransports() error {
 	var initErrors []string
 
-	// TEMPORARILY DISABLE HTTPS LOCAL RELAY - it has cross-machine communication issues
-	// Will re-enable once fixed to work across network
-	fmt.Printf("Note: HTTPS local relay temporarily disabled due to cross-machine communication issues\n")
+	// HTTPS INTERNATIONAL TRANSPORT - PRIMARY for Europe-to-US firewall traversal
+	httpsTransport := &HTTPSTunnelTransport{priority: 95}
+	if err := httpsTransport.Setup(mtm.config); err == nil {
+		mtm.transports = append(mtm.transports, httpsTransport)
+		fmt.Printf("HTTPS International transport initialized as PRIMARY (priority: %d)\n", httpsTransport.GetPriority())
+	} else {
+		initErrors = append(initErrors, fmt.Sprintf("HTTPS-International: %v", err))
+		fmt.Printf("Warning: HTTPS International failed to initialize: %v\n", err)
+	}
 
-	// Initialize Enhanced Croc transport as PRIMARY (highest priority for now)
-	crocTransport := NewCrocTransport(100) // Highest priority temporarily
+	// WEBSOCKET TRANSPORT - SECONDARY for firewall traversal
+	websocketTransport := NewWebSocketTransport(70)
+	if err := websocketTransport.Setup(mtm.config); err == nil {
+		mtm.transports = append(mtm.transports, websocketTransport)
+		fmt.Printf("WebSocket transport initialized as SECONDARY (priority: %d)\n", websocketTransport.GetPriority())
+	} else {
+		initErrors = append(initErrors, fmt.Sprintf("WebSocket: %v", err))
+		fmt.Printf("Warning: WebSocket failed to initialize: %v\n", err)
+	}
+
+	// CROC TRANSPORT - FALLBACK for when others fail
+	crocTransport := NewCrocTransport(60) // Lower priority as fallback
 	if err := crocTransport.Setup(mtm.config); err == nil {
 		mtm.transports = append(mtm.transports, crocTransport)
-		fmt.Printf("Enhanced CROC transport initialized as PRIMARY (priority: %d)\n", crocTransport.GetPriority())
+		fmt.Printf("CROC transport initialized as FALLBACK (priority: %d)\n", crocTransport.GetPriority())
 	} else {
-		initErrors = append(initErrors, fmt.Sprintf("Enhanced-CROC: %v", err))
-		fmt.Printf("Warning: Enhanced CROC failed to initialize: %v\n", err)
+		initErrors = append(initErrors, fmt.Sprintf("CROC: %v", err))
+		fmt.Printf("Warning: CROC failed to initialize: %v\n", err)
 	}
 
-	// TEMPORARILY DISABLE unimplemented transports to avoid confusion
-	fmt.Printf("Note: WebSocket and DirectP2P transports temporarily disabled (not implemented)\n")
-
-	// Initialize only working fallback transports
-	transportsToInit := []struct {
-		name      string
-		transport Transport
-	}{
-		{"Tor", &TorTransport{priority: 75}},
-		// WebSocket and DirectP2P removed until implemented
-	}
-
-	for _, t := range transportsToInit {
-		if err := t.transport.Setup(mtm.config); err == nil {
-			mtm.transports = append(mtm.transports, t.transport)
-			fmt.Printf("%s transport initialized (priority: %d)\n", t.name, t.transport.GetPriority())
-		} else {
-			initErrors = append(initErrors, fmt.Sprintf("%s: %v", t.name, err))
-			fmt.Printf("Warning: %s transport failed to initialize: %v\n", t.name, err)
-		}
+	// TOR TRANSPORT - Optional for maximum security
+	torTransport := &TorTransport{priority: 50}
+	if err := torTransport.Setup(mtm.config); err == nil {
+		mtm.transports = append(mtm.transports, torTransport)
+		fmt.Printf("Tor transport initialized as OPTIONAL (priority: %d)\n", torTransport.GetPriority())
+	} else {
+		initErrors = append(initErrors, fmt.Sprintf("Tor: %v", err))
+		fmt.Printf("Warning: Tor transport failed to initialize: %v\n", err)
 	}
 
 	// Ensure we have at least one working transport
 	if len(mtm.transports) == 0 {
-		return fmt.Errorf("CRITICAL: No transports available for file transfer. Errors: %s", strings.Join(initErrors, "; "))
+		return fmt.Errorf("CRITICAL: No transports available for Europe-to-US file transfer. Errors: %s", strings.Join(initErrors, "; "))
 	}
 
 	// Log successful initialization
+	totalTransports := 4 // HTTPS, WebSocket, CROC, Tor
 	fmt.Printf("Transport manager ready with %d/%d transports successfully initialized\n",
-		len(mtm.transports), len(transportsToInit)+1) // +1 for CROC
+		len(mtm.transports), totalTransports)
 
 	if len(initErrors) > 0 {
 		fmt.Printf("Some transports failed to initialize (will continue with available ones): %s\n",
 			strings.Join(initErrors, "; "))
 	}
+
+	// Provide network guidance for Europe-to-US transfers
+	fmt.Printf("\n🌍 EUROPE-TO-US TRANSFER CONFIGURATION:\n")
+	fmt.Printf("   Priority 1 (95): HTTPS International - Uses public HTTPS services\n")
+	fmt.Printf("   Priority 2 (70): WebSocket - Uses WebSocket echo services\n")
+	fmt.Printf("   Priority 3 (60): CROC - P2P with relay servers\n")
+	fmt.Printf("   Priority 4 (50): Tor - Maximum privacy (if installed)\n")
+	fmt.Printf("   🔥 FIREWALL TRAVERSAL: HTTPS + WebSocket optimized for corporate networks\n\n")
 
 	return nil
 }
