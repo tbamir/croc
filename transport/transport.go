@@ -126,7 +126,7 @@ func (mtm *MultiTransportManager) initializeTransports() error {
 	var initErrors []string
 
 	// HTTPS INTERNATIONAL TRANSPORT - PRIMARY for Europe-to-US firewall traversal
-	httpsTransport := &HTTPSTunnelTransport{priority: 95}
+	httpsTransport := NewHTTPSTunnelTransport(95)
 	if err := httpsTransport.Setup(mtm.config); err == nil {
 		mtm.transports = append(mtm.transports, httpsTransport)
 		fmt.Printf("HTTPS International transport initialized as PRIMARY (priority: %d)\n", httpsTransport.GetPriority())

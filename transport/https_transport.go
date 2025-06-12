@@ -3,12 +3,12 @@ package transport
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -77,16 +77,18 @@ func (r *SimpleHTTPRelay) Stop() error {
 
 // handleRelay handles POST requests to store data
 func (r *SimpleHTTPRelay) handleRelay(w http.ResponseWriter, req *http.Request) {
-	switch req.Method {
-	case http.MethodPost:
-		body, err := io.ReadAll(req.Body)
-		if err != nil {
-			http.Error(w, "Failed to read body", http.StatusBadRequest)
-			return
-		}
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
+	if req.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if req.Method == "POST" {
 		var payload HTTPSTransferPayload
-		if err := json.Unmarshal(body, &payload); err != nil {
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
@@ -95,52 +97,409 @@ func (r *SimpleHTTPRelay) handleRelay(w http.ResponseWriter, req *http.Request) 
 		r.storage[payload.TransferID] = payload
 		r.mutex.Unlock()
 
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte("OK"))
-
-	default:
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "stored"})
+	} else {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
 // handleRelayWithID handles GET requests to retrieve data
 func (r *SimpleHTTPRelay) handleRelayWithID(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodGet {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if req.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	transferID := req.URL.Path[len("/relay/"):]
+	if transferID == "" {
+		http.Error(w, "Transfer ID required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Method == "GET" {
+		r.mutex.RLock()
+		payload, exists := r.storage[transferID]
+		r.mutex.RUnlock()
+
+		if !exists {
+			http.Error(w, "Transfer not found", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(payload)
+	} else {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
 	}
-
-	// Extract transfer ID from URL path
-	path := req.URL.Path
-	if len(path) < 7 { // "/relay/"
-		http.Error(w, "Invalid path", http.StatusBadRequest)
-		return
-	}
-
-	transferID := path[7:] // Remove "/relay/" prefix
-
-	r.mutex.RLock()
-	payload, exists := r.storage[transferID]
-	r.mutex.RUnlock()
-
-	if !exists {
-		http.Error(w, "Transfer not found", http.StatusNotFound)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(payload)
 }
 
-// HTTPSTunnelTransport provides institutional-network-friendly file transfer
-// Uses local HTTP relay servers to work through corporate firewalls
+// HTTPSRelayService represents a file relay service
+type HTTPSRelayService struct {
+	Name         string
+	URL          string
+	MaxSize      int64
+	RequiresAuth bool
+	Priority     int
+}
+
+// Available HTTPS relay services (ordered by reliability for corporate networks)
+var relayServices = []HTTPSRelayService{
+	{
+		Name:         "Transfer.sh",
+		URL:          "https://transfer.sh/",
+		MaxSize:      10 * 1024 * 1024 * 1024, // 10GB
+		RequiresAuth: false,
+		Priority:     100,
+	},
+	{
+		Name:         "File.io",
+		URL:          "https://file.io/",
+		MaxSize:      2 * 1024 * 1024 * 1024, // 2GB
+		RequiresAuth: false,
+		Priority:     90,
+	},
+	{
+		Name:         "0x0.st",
+		URL:          "https://0x0.st/",
+		MaxSize:      512 * 1024 * 1024, // 512MB
+		RequiresAuth: false,
+		Priority:     80,
+	},
+	{
+		Name:         "GitHub Gists",
+		URL:          "https://api.github.com/gists",
+		MaxSize:      25 * 1024 * 1024, // 25MB (base64 encoded)
+		RequiresAuth: true,
+		Priority:     70, // Lower priority due to auth requirement
+	},
+}
+
 type HTTPSTunnelTransport struct {
+	client      *http.Client
+	maxFileSize int64
+	githubToken string
 	priority    int
 	config      TransportConfig
-	httpClient  *http.Client
-	relayURLs   []string
-	mutex       sync.RWMutex
-	relayServer *SimpleHTTPRelay
+}
+
+func NewHTTPSTunnelTransport(priority int) *HTTPSTunnelTransport {
+	// Create HTTP client with corporate proxy support
+	client := &http.Client{
+		Timeout: 120 * time.Second, // Extended timeout for international transfers
+		Transport: &http.Transport{
+			Proxy:               http.ProxyFromEnvironment, // Corporate proxy support
+			MaxIdleConns:        10,
+			IdleConnTimeout:     90 * time.Second,
+			DisableCompression:  false,
+			TLSHandshakeTimeout: 30 * time.Second,
+		},
+	}
+
+	// Check for GitHub token (optional)
+	githubToken := os.Getenv("GITHUB_TOKEN")
+	if githubToken == "" {
+		githubToken = os.Getenv("GITHUB_API_TOKEN")
+	}
+
+	return &HTTPSTunnelTransport{
+		client:      client,
+		maxFileSize: 50 * 1024 * 1024, // 50MB max for HTTPS transport
+		githubToken: githubToken,
+		priority:    priority,
+	}
+}
+
+func (t *HTTPSTunnelTransport) Setup(config TransportConfig) error {
+	t.config = config
+	fmt.Printf("HTTPS International Transport initialized with GitHub Gists API and %d backup endpoints\n", len(relayServices)-1)
+	return nil
+}
+
+// Send transmits data through multiple HTTPS relay services with automatic failover
+func (t *HTTPSTunnelTransport) Send(data []byte, metadata TransferMetadata) error {
+	// CRITICAL FIX: Validate size before any processing to prevent memory exhaustion
+	maxRawSize := int64(25 * 1024 * 1024) // 25MB raw data limit (will be ~33MB base64)
+	if int64(len(data)) > maxRawSize {
+		return fmt.Errorf("file too large for HTTPS transport (%d bytes, max %d). Use CROC transport for large files", len(data), maxRawSize)
+	}
+
+	// Additional check for base64 expansion (4/3 ratio)
+	estimatedBase64Size := int64(len(data)) * 4 / 3
+	maxBase64Size := int64(50 * 1024 * 1024) // 50MB base64 limit
+	if estimatedBase64Size > maxBase64Size {
+		return fmt.Errorf("file too large after base64 encoding (%d bytes estimated, max %d). Use CROC transport for large files", estimatedBase64Size, maxBase64Size)
+	}
+
+	fmt.Println("🌍 Attempting international HTTPS transfer via multiple relay services...")
+
+	// Try each service in priority order
+	var lastError error
+	for _, service := range relayServices {
+		// Skip GitHub Gists if no token available
+		if service.RequiresAuth && service.Name == "GitHub Gists" && t.githubToken == "" {
+			fmt.Printf("⚠️  Skipping %s (no authentication token)\n", service.Name)
+			continue
+		}
+
+		// Check size limits
+		if int64(len(data)) > service.MaxSize {
+			fmt.Printf("⚠️  Skipping %s (file too large: %d > %d)\n", service.Name, len(data), service.MaxSize)
+			continue
+		}
+
+		fmt.Printf("🔄 Trying %s...\n", service.Name)
+
+		err := t.sendViaService(service, data, metadata)
+		if err == nil {
+			fmt.Printf("✅ Successfully sent via %s\n", service.Name)
+			return nil
+		}
+
+		fmt.Printf("❌ %s failed: %v\n", service.Name, err)
+		lastError = err
+	}
+
+	return fmt.Errorf("all HTTPS relay services failed, last error: %w", lastError)
+}
+
+// sendViaService attempts to send data via a specific relay service
+func (t *HTTPSTunnelTransport) sendViaService(service HTTPSRelayService, data []byte, metadata TransferMetadata) error {
+	switch service.Name {
+	case "Transfer.sh":
+		return t.sendViaTransferSh(data, metadata)
+	case "File.io":
+		return t.sendViaFileIo(data, metadata)
+	case "0x0.st":
+		return t.sendVia0x0St(data, metadata)
+	case "GitHub Gists":
+		return t.sendViaGitHubGists(data, metadata)
+	default:
+		return fmt.Errorf("unknown service: %s", service.Name)
+	}
+}
+
+// sendViaTransferSh sends data via transfer.sh
+func (t *HTTPSTunnelTransport) sendViaTransferSh(data []byte, metadata TransferMetadata) error {
+	url := "https://transfer.sh/" + metadata.TransferID
+
+	req, err := http.NewRequest("PUT", url, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("User-Agent", "TrustDrop-Bulletproof/1.0")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("transfer.sh returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// sendViaFileIo sends data via file.io
+func (t *HTTPSTunnelTransport) sendViaFileIo(data []byte, metadata TransferMetadata) error {
+	// File.io requires multipart form data
+	var buf bytes.Buffer
+	boundary := "----TrustDropBoundary"
+
+	buf.WriteString("--" + boundary + "\r\n")
+	buf.WriteString("Content-Disposition: form-data; name=\"file\"; filename=\"" + metadata.TransferID + "\"\r\n")
+	buf.WriteString("Content-Type: application/octet-stream\r\n\r\n")
+	buf.Write(data)
+	buf.WriteString("\r\n--" + boundary + "--\r\n")
+
+	req, err := http.NewRequest("POST", "https://file.io/", &buf)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+	req.Header.Set("User-Agent", "TrustDrop-Bulletproof/1.0")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("file.io returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// sendVia0x0St sends data via 0x0.st
+func (t *HTTPSTunnelTransport) sendVia0x0St(data []byte, metadata TransferMetadata) error {
+	// 0x0.st requires multipart form data
+	var buf bytes.Buffer
+	boundary := "----TrustDropBoundary"
+
+	buf.WriteString("--" + boundary + "\r\n")
+	buf.WriteString("Content-Disposition: form-data; name=\"file\"; filename=\"" + metadata.TransferID + "\"\r\n")
+	buf.WriteString("Content-Type: application/octet-stream\r\n\r\n")
+	buf.Write(data)
+	buf.WriteString("\r\n--" + boundary + "--\r\n")
+
+	req, err := http.NewRequest("POST", "https://0x0.st/", &buf)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+	req.Header.Set("User-Agent", "TrustDrop-Bulletproof/1.0")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("0x0.st returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// sendViaGitHubGists sends data via GitHub Gists API (requires authentication)
+func (t *HTTPSTunnelTransport) sendViaGitHubGists(data []byte, metadata TransferMetadata) error {
+	// Now safe to encode - we've validated size limits
+	encodedData := base64.StdEncoding.EncodeToString(data)
+
+	// Create gist payload
+	gistPayload := map[string]interface{}{
+		"description": fmt.Sprintf("TrustDrop transfer: %s", metadata.TransferID),
+		"public":      false,
+		"files": map[string]interface{}{
+			metadata.TransferID + ".txt": map[string]string{
+				"content": encodedData,
+			},
+		},
+	}
+
+	payloadBytes, err := json.Marshal(gistPayload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal gist payload: %w", err)
+	}
+
+	// Create request with authentication
+	req, err := http.NewRequest("POST", "https://api.github.com/gists", bytes.NewReader(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create gist request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "token "+t.githubToken)
+	req.Header.Set("User-Agent", "TrustDrop-Bulletproof/1.0")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to create gist: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github API returned status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return nil
+}
+
+// Receive retrieves data from HTTPS relay services
+func (t *HTTPSTunnelTransport) Receive(metadata TransferMetadata) ([]byte, error) {
+	fmt.Println("🌍 Attempting to receive via international HTTPS relay services...")
+
+	// Try each service to find the data
+	var lastError error
+	for _, service := range relayServices {
+		fmt.Printf("🔄 Trying to receive from %s...\n", service.Name)
+
+		data, err := t.receiveViaService(service, metadata.TransferID)
+		if err == nil {
+			fmt.Printf("✅ Successfully received from %s\n", service.Name)
+			return data, nil
+		}
+
+		fmt.Printf("❌ %s failed: %v\n", service.Name, err)
+		lastError = err
+	}
+
+	return nil, fmt.Errorf("failed to receive from all HTTPS relay services, last error: %w", lastError)
+}
+
+// receiveViaService attempts to receive data from a specific relay service
+func (t *HTTPSTunnelTransport) receiveViaService(service HTTPSRelayService, transferID string) ([]byte, error) {
+	switch service.Name {
+	case "GitHub Gists":
+		return t.receiveViaGitHubGists(transferID)
+	default:
+		// For other services, we'd need to implement specific retrieval methods
+		// For now, focus on GitHub Gists as the primary method
+		return nil, fmt.Errorf("receive not implemented for %s", service.Name)
+	}
+}
+
+// receiveViaGitHubGists receives data from GitHub Gists
+func (t *HTTPSTunnelTransport) receiveViaGitHubGists(transferID string) ([]byte, error) {
+	// This would require storing the gist ID somewhere accessible
+	// For now, return an error indicating this needs implementation
+	return nil, fmt.Errorf("GitHub Gists receive requires gist ID storage implementation")
+}
+
+func (t *HTTPSTunnelTransport) GetName() string {
+	return "HTTPS International"
+}
+
+func (t *HTTPSTunnelTransport) GetPriority() int {
+	return t.priority
+}
+
+func (t *HTTPSTunnelTransport) IsAvailable(ctx context.Context) bool {
+	// Test connectivity to at least one service
+	testCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	for _, service := range relayServices[:2] { // Test first 2 services
+		if service.RequiresAuth && service.Name == "GitHub Gists" && t.githubToken == "" {
+			continue
+		}
+
+		req, err := http.NewRequestWithContext(testCtx, "HEAD", service.URL, nil)
+		if err != nil {
+			continue
+		}
+
+		resp, err := t.client.Do(req)
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode < 500 { // Accept any non-server-error response
+			return true
+		}
+	}
+
+	return false
+}
+
+func (t *HTTPSTunnelTransport) Close() error {
+	// Nothing to close for HTTP client
+	return nil
 }
 
 // HTTPSTransferPayload represents the data structure for HTTPS transfers
@@ -153,263 +512,4 @@ type HTTPSTransferPayload struct {
 	Timestamp   time.Time `json:"timestamp"`
 	ChunkIndex  int       `json:"chunk_index,omitempty"`
 	TotalChunks int       `json:"total_chunks,omitempty"`
-}
-
-// Setup initializes the HTTPS tunnel transport with REMOTE relay servers for international transfers
-func (t *HTTPSTunnelTransport) Setup(config TransportConfig) error {
-	t.config = config
-	t.priority = 95 // High priority for corporate networks
-
-	// Use GitHub Gists API for actual data storage across international transfers
-	// This works through most corporate firewalls since GitHub is commonly allowed
-	t.relayURLs = []string{
-		"https://api.github.com/gists", // Primary - GitHub Gists API
-		"https://httpbin.org/post",     // Secondary - testing endpoint
-		"https://reqres.in/api/data",   // Tertiary - testing endpoint
-	}
-
-	// NO local relay server needed - use remote services only
-	fmt.Printf("HTTPS International Transport initialized with GitHub Gists API and %d backup endpoints\n", len(t.relayURLs))
-
-	// Create HTTP client optimized for international connections through firewalls
-	t.httpClient = &http.Client{
-		Timeout: 120 * time.Second, // Extended timeout for international transfers
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				MinVersion:         tls.VersionTLS12,
-				InsecureSkipVerify: false, // Use proper TLS for security
-			},
-			DisableKeepAlives:     false,
-			MaxIdleConns:          20,
-			MaxIdleConnsPerHost:   10,
-			IdleConnTimeout:       60 * time.Second,
-			ResponseHeaderTimeout: 60 * time.Second,
-			ExpectContinueTimeout: 10 * time.Second,
-			// Proxy settings for corporate environments
-			Proxy: http.ProxyFromEnvironment, // Use system proxy settings
-		},
-	}
-
-	return nil
-}
-
-// Send transmits data through GitHub Gists API or backup international HTTPS endpoints
-func (t *HTTPSTunnelTransport) Send(data []byte, metadata TransferMetadata) error {
-	// Check file size limits
-	maxSize := int64(50 * 1024 * 1024) // 50MB limit for HTTPS transport
-	if int64(len(data)) > maxSize {
-		return fmt.Errorf("file too large for HTTPS transport (%d bytes, max %d). Use CROC or WebSocket transport for large files", len(data), maxSize)
-	}
-
-	// Encode data as base64 for JSON compatibility
-	encodedData := base64.StdEncoding.EncodeToString(data)
-
-	fmt.Println("🌍 Attempting international HTTPS transfer via GitHub Gists API...")
-
-	// Try GitHub Gists API first (most reliable for corporate networks)
-	if err := t.sendViaGitHubGists(encodedData, metadata); err == nil {
-		fmt.Printf("✅ GitHub Gists transfer successful! Gist ID: %s\n", metadata.TransferID)
-		return nil
-	} else {
-		fmt.Printf("❌ GitHub Gists API failed: %v\n", err)
-		fmt.Println("🔄 Falling back to backup HTTPS endpoints...")
-	}
-
-	// Fallback to backup endpoints
-	payload := HTTPSTransferPayload{
-		TransferID: metadata.TransferID,
-		FileName:   metadata.FileName,
-		FileSize:   int64(len(data)),
-		Data:       encodedData,
-		Timestamp:  time.Now(),
-	}
-
-	// Try backup endpoints
-	for i, relayURL := range t.relayURLs[1:] { // Skip GitHub (already tried)
-		fmt.Printf("🔄 Trying backup endpoint %d/%d: %s\n", i+1, len(t.relayURLs)-1, relayURL)
-
-		if err := t.sendToRelay(relayURL, payload); err == nil {
-			fmt.Printf("✅ HTTPS backup transfer successful via: %s\n", relayURL)
-			return nil
-		} else {
-			fmt.Printf("❌ Backup endpoint failed: %v\n", err)
-		}
-	}
-
-	return fmt.Errorf("HTTPS International transport requires GitHub API access for data storage. Primary method failed: %v",
-		"GitHub API returned status 401: {\"message\":\"Requires authentication\",\"documentation_url\":\"https://docs.github.com/rest/gists/gists#create-a-gist\",\"status\":\"401\"}")
-}
-
-// sendViaGitHubGists uses GitHub Gists API to store transfer data
-func (t *HTTPSTunnelTransport) sendViaGitHubGists(encodedData string, metadata TransferMetadata) error {
-	// Create GitHub Gist payload
-	gistPayload := map[string]interface{}{
-		"description": fmt.Sprintf("TrustDrop Transfer: %s", metadata.FileName),
-		"public":      false, // Private gist for security
-		"files": map[string]interface{}{
-			fmt.Sprintf("trustdrop_%s.json", metadata.TransferID): map[string]interface{}{
-				"content": fmt.Sprintf(`{
-	"transfer_id": "%s",
-	"file_name": "%s",
-	"file_size": %d,
-	"checksum": "%s",
-	"data": "%s",
-	"timestamp": "%s"
-}`, metadata.TransferID, metadata.FileName, metadata.FileSize, metadata.Checksum, encodedData, time.Now().UTC().Format(time.RFC3339)),
-			},
-		},
-	}
-
-	payloadBytes, err := json.Marshal(gistPayload)
-	if err != nil {
-		return fmt.Errorf("failed to create GitHub Gist payload: %w", err)
-	}
-
-	// Create GitHub API request
-	req, err := http.NewRequest("POST", "https://api.github.com/gists", bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		return fmt.Errorf("failed to create GitHub API request: %w", err)
-	}
-
-	// Headers for GitHub API
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "TrustDrop-International/1.0")
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	// Note: Anonymous gists are allowed, so no authentication required
-
-	// Send request
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-	req = req.WithContext(ctx)
-
-	resp, err := t.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("GitHub API request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 201 { // GitHub returns 201 for successful gist creation
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	// Parse response to get gist URL
-	var gistResponse map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&gistResponse); err != nil {
-		return fmt.Errorf("failed to parse GitHub API response: %w", err)
-	}
-
-	if gistURL, ok := gistResponse["html_url"].(string); ok {
-		fmt.Printf("📝 GitHub Gist created successfully: %s\n", gistURL)
-		fmt.Printf("📋 Share this transfer ID with recipient: %s\n", metadata.TransferID)
-	}
-
-	return nil
-}
-
-// sendToRelay sends data to a backup HTTPS endpoint
-func (t *HTTPSTunnelTransport) sendToRelay(relayURL string, payload HTTPSTransferPayload) error {
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal payload: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", relayURL, bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "TrustDrop-International/1.0")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	req = req.WithContext(ctx)
-
-	resp, err := t.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned status %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	return nil
-}
-
-// Receive gets data from GitHub Gists API
-func (t *HTTPSTunnelTransport) Receive(metadata TransferMetadata) ([]byte, error) {
-	fmt.Printf("🌍 Attempting to receive international HTTPS transfer via GitHub Gists API...\n")
-	fmt.Printf("🔍 Searching for transfer ID: %s\n", metadata.TransferID)
-
-	// For now, return a helpful error since we need the specific gist ID
-	// In a production system, we'd implement a discovery mechanism
-	return nil, fmt.Errorf("HTTPS International receive requires specific gist ID. This transport is primarily for sending. For receiving, please use CROC or WebSocket transport")
-}
-
-// IsAvailable checks if international HTTPS relays are available
-func (t *HTTPSTunnelTransport) IsAvailable(ctx context.Context) bool {
-	// Test connectivity to international relay servers (not local)
-	for i, relayURL := range t.relayURLs {
-		if i >= 3 { // Test first 3 international relays
-			break
-		}
-		if t.testInternationalRelayConnectivity(ctx, relayURL) {
-			fmt.Printf("HTTPS International transport available via: %s\n", relayURL)
-			return true
-		}
-	}
-	fmt.Printf("HTTPS International transport not available - no relay servers reachable\n")
-	return false
-}
-
-// testInternationalRelayConnectivity tests connection to international relay servers
-func (t *HTTPSTunnelTransport) testInternationalRelayConnectivity(ctx context.Context, relayURL string) bool {
-	client := &http.Client{
-		Timeout: 10 * time.Second, // Extended timeout for international connectivity
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment, // Use system proxy for corporate networks
-		},
-	}
-
-	// Use HEAD request for connectivity test (lighter than GET)
-	req, err := http.NewRequestWithContext(ctx, "HEAD", relayURL, nil)
-	if err != nil {
-		return false
-	}
-
-	// Add headers that help with firewall traversal
-	req.Header.Set("User-Agent", "TrustDrop-International/1.0")
-	req.Header.Set("Accept", "*/*")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-
-	// Accept any response from the server (including 404) as proof of connectivity
-	// The important thing is that we can reach the server through the firewall
-	return resp.StatusCode > 0
-}
-
-// GetPriority returns the transport priority
-func (t *HTTPSTunnelTransport) GetPriority() int {
-	return t.priority
-}
-
-// GetName returns the transport name
-func (t *HTTPSTunnelTransport) GetName() string {
-	return "https-international"
-}
-
-// Close cleans up the transport and stops relay server
-func (t *HTTPSTunnelTransport) Close() error {
-	if t.relayServer != nil {
-		return t.relayServer.Stop()
-	}
-	return nil
 }

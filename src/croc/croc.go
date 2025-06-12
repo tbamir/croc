@@ -1687,7 +1687,8 @@ func (c *Client) recipientGetFileReady(finished bool) (err error) {
 			Type: message.TypeFinished,
 		})
 		if err != nil {
-			panic(err)
+			log.Errorf("critical error sending finish message: %v", err)
+			return err
 		}
 		c.SuccessfulTransfer = true
 		c.FilesHasFinished[c.FilesToTransferCurrentNum] = struct{}{}
@@ -1944,6 +1945,14 @@ func (c *Client) updateState() (err error) {
 		if err != nil {
 			return
 		}
+		// CRITICAL FIX: Ensure file is closed even on error paths
+		defer func() {
+			if c.fread != nil {
+				if closeErr := c.fread.Close(); closeErr != nil {
+					log.Errorf("error closing file in defer: %v", closeErr)
+				}
+			}
+		}()
 		for i := 0; i < len(c.Options.RelayPorts); i++ {
 			log.Debugf("starting sending over comm %d", i)
 			go c.sendData(i)
@@ -2000,7 +2009,8 @@ func (c *Client) receiveData(i int) {
 
 		data, err = crypt.Decrypt(data, c.Key)
 		if err != nil {
-			panic(err)
+			log.Errorf("critical error decrypting data: %v", err)
+			break // Exit the loop instead of panicking
 		}
 		if !c.Options.NoCompress {
 			data = compress.Decompress(data)
@@ -2011,14 +2021,17 @@ func (c *Client) receiveData(i int) {
 		rbuf := bytes.NewReader(data[:8])
 		err = binary.Read(rbuf, binary.LittleEndian, &position)
 		if err != nil {
-			panic(err)
+			log.Errorf("critical error reading position: %v", err)
+			break // Exit the loop instead of panicking
 		}
 		positionInt64 := int64(position)
 
 		c.mutex.Lock()
 		_, err = c.CurrentFile.WriteAt(data[8:], positionInt64)
 		if err != nil {
-			panic(err)
+			log.Errorf("critical error writing to file: %v", err)
+			c.mutex.Unlock()
+			break // Exit the loop instead of panicking
 		}
 		c.bar.Add(len(data[8:]))
 		c.TotalSent += int64(len(data[8:]))
@@ -2046,7 +2059,9 @@ func (c *Client) receiveData(i int) {
 				Type: message.TypeCloseSender,
 			})
 			if err != nil {
-				panic(err)
+				log.Errorf("critical error sending close message: %v", err)
+				c.mutex.Unlock()
+				break // Exit the loop instead of panicking
 			}
 		}
 		c.mutex.Unlock()
@@ -2112,12 +2127,14 @@ func (c *Client) sendData(i int) {
 						)
 					}
 					if err != nil {
-						panic(err)
+						log.Errorf("critical error encrypting data: %v", err)
+						return // Exit the function instead of panicking
 					}
 
 					err = c.conn[i+1].Send(dataToSend)
 					if err != nil {
-						panic(err)
+						log.Errorf("critical error sending data: %v", err)
+						return // Exit the function instead of panicking
 					}
 					c.bar.Add(n)
 					c.TotalSent += int64(n)
@@ -2137,7 +2154,8 @@ func (c *Client) sendData(i int) {
 			if errRead == io.EOF {
 				break
 			}
-			panic(errRead)
+			log.Errorf("critical error reading file: %v", errRead)
+			return // Exit the function instead of panicking
 		}
 	}
 }
