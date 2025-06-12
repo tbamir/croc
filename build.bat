@@ -42,24 +42,8 @@ if exist "image.png" (
 REM Convert PNG to ICO format for Windows
 echo Creating Windows icon...
 if exist "image.png" (
-    REM Try using ImageMagick if available
-    where magick >nul 2>nul
-    if !errorlevel! equ 0 (
-        echo    Using ImageMagick to convert PNG to ICO...
-        magick image.png -resize 16x16 temp16.png
-        magick image.png -resize 32x32 temp32.png
-        magick image.png -resize 48x48 temp48.png
-        magick image.png -resize 64x64 temp64.png
-        magick image.png -resize 128x128 temp128.png
-        magick image.png -resize 256x256 temp256.png
-        magick temp16.png temp32.png temp48.png temp64.png temp128.png temp256.png icon.ico
-        del temp16.png temp32.png temp48.png temp64.png temp128.png temp256.png >nul 2>nul
-        echo Windows icon (.ico) created successfully
-    ) else (
-        echo ImageMagick not found, skipping icon creation for now...
-        echo You can manually convert image.png to icon.ico if needed
-        copy image.png icon.png >nul 2>nul
-    )
+    echo Skipping icon conversion - build will proceed without embedded icon
+    echo Note: You can manually create icon.ico from image.png if needed
 ) else (
     echo PNG icon not found, skipping icon creation
 )
