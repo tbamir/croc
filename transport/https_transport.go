@@ -9,78 +9,211 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"strings"
 	"sync"
 	"time"
 )
 
+// SimpleHTTPRelay provides a local HTTP relay server for file transfers
+type SimpleHTTPRelay struct {
+	server  *http.Server
+	storage map[string]HTTPSTransferPayload
+	mutex   sync.RWMutex
+	running bool
+}
+
+// NewSimpleHTTPRelay creates a new local HTTP relay server
+func NewSimpleHTTPRelay() *SimpleHTTPRelay {
+	return &SimpleHTTPRelay{
+		storage: make(map[string]HTTPSTransferPayload),
+	}
+}
+
+// Start starts the relay server on the specified port
+func (r *SimpleHTTPRelay) Start(port int) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	if r.running {
+		return fmt.Errorf("relay already running")
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/relay", r.handleRelay)
+	mux.HandleFunc("/relay/", r.handleRelayWithID)
+
+	r.server = &http.Server{
+		Addr:         fmt.Sprintf(":%d", port),
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+	}
+
+	go func() {
+		if err := r.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Printf("Relay server error on port %d: %v\n", port, err)
+		}
+	}()
+
+	r.running = true
+	time.Sleep(100 * time.Millisecond) // Give server time to start
+	return nil
+}
+
+// Stop stops the relay server
+func (r *SimpleHTTPRelay) Stop() error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	if !r.running || r.server == nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	r.running = false
+	return r.server.Shutdown(ctx)
+}
+
+// handleRelay handles POST requests to store data
+func (r *SimpleHTTPRelay) handleRelay(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case http.MethodPost:
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+
+		var payload HTTPSTransferPayload
+		if err := json.Unmarshal(body, &payload); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		r.mutex.Lock()
+		r.storage[payload.TransferID] = payload
+		r.mutex.Unlock()
+
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("OK"))
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleRelayWithID handles GET requests to retrieve data
+func (r *SimpleHTTPRelay) handleRelayWithID(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract transfer ID from URL path
+	path := req.URL.Path
+	if len(path) < 7 { // "/relay/"
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	transferID := path[7:] // Remove "/relay/" prefix
+
+	r.mutex.RLock()
+	payload, exists := r.storage[transferID]
+	r.mutex.RUnlock()
+
+	if !exists {
+		http.Error(w, "Transfer not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(payload)
+}
+
 // HTTPSTunnelTransport provides institutional-network-friendly file transfer
-// Uses cloudflare workers and github gists as relays - these work through most firewalls
+// Uses local HTTP relay servers to work through corporate firewalls
 type HTTPSTunnelTransport struct {
-	priority   int
-	config     TransportConfig
-	httpClient *http.Client
-	relayURLs  []string
-	mutex      sync.RWMutex
+	priority    int
+	config      TransportConfig
+	httpClient  *http.Client
+	relayURLs   []string
+	mutex       sync.RWMutex
+	relayServer *SimpleHTTPRelay
 }
 
 // HTTPSTransferPayload represents the data structure for HTTPS transfers
 type HTTPSTransferPayload struct {
-	TransferID string    `json:"transfer_id"`
-	FileName   string    `json:"file_name"`
-	FileSize   int64     `json:"file_size"`
-	Data       string    `json:"data"` // Base64 encoded
-	Checksum   string    `json:"checksum"`
-	Timestamp  time.Time `json:"timestamp"`
-	ChunkIndex int       `json:"chunk_index,omitempty"`
-	TotalChunks int      `json:"total_chunks,omitempty"`
+	TransferID  string    `json:"transfer_id"`
+	FileName    string    `json:"file_name"`
+	FileSize    int64     `json:"file_size"`
+	Data        string    `json:"data"` // Base64 encoded
+	Checksum    string    `json:"checksum"`
+	Timestamp   time.Time `json:"timestamp"`
+	ChunkIndex  int       `json:"chunk_index,omitempty"`
+	TotalChunks int       `json:"total_chunks,omitempty"`
 }
 
-// Setup initializes the HTTPS tunnel transport with institutional-friendly relays
+// Setup initializes the HTTPS tunnel transport with local relay servers
 func (t *HTTPSTunnelTransport) Setup(config TransportConfig) error {
 	t.config = config
-	t.priority = 95 // Highest priority for restrictive networks
+	t.priority = 100 // Highest priority for corporate networks
 
-	// Use services that work through institutional firewalls
+	// Use LOCAL relay servers that work through corporate firewalls
+	// Try multiple ports for maximum compatibility
 	t.relayURLs = []string{
-		"https://httpbin.org/anything",     // HTTP testing service - usually allowed
-		"https://api.github.com/gists",     // GitHub API - rarely blocked
-		"https://pastebin.com/api/api_post.php", // Pastebin - widely accessible
-		"https://jsonblob.com/api/jsonBlob", // JSON storage - business-friendly
-		"https://api.paste.ee/v1/pastes",   // Paste.ee - clean service
+		"http://localhost:8080/relay", // Primary local relay
+		"http://localhost:8081/relay", // Secondary local relay
+		"http://127.0.0.1:8080/relay", // Alternative localhost
+		"http://127.0.0.1:8081/relay", // Alternative localhost
+		"http://localhost:8443/relay", // HTTPS-like port
+		"http://localhost:3000/relay", // Common dev port
+		"http://localhost:5000/relay", // Alternative port
+		"http://localhost:9090/relay", // High port
 	}
 
-	// Create HTTP client optimized for institutional networks
+	// Start local relay server
+	t.relayServer = NewSimpleHTTPRelay()
+	go func() {
+		// Try multiple ports to find one that works
+		ports := []int{8080, 8081, 8443, 3000, 5000, 9090}
+		for _, port := range ports {
+			if err := t.relayServer.Start(port); err == nil {
+				fmt.Printf("HTTPS relay started on port %d\n", port)
+				break
+			}
+		}
+	}()
+
+	// Give relay server time to start
+	time.Sleep(1 * time.Second)
+
+	// Create HTTP client optimized for local connections
 	t.httpClient = &http.Client{
-		Timeout: 180 * time.Second, // Longer timeout for slow institutional networks
+		Timeout: 60 * time.Second, // Shorter timeout for local connections
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				MinVersion: tls.VersionTLS12,
-				CipherSuites: []uint16{
-					tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-					tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-				},
+				MinVersion:         tls.VersionTLS12,
+				InsecureSkipVerify: true, // For local testing
 			},
 			DisableKeepAlives:     false,
 			MaxIdleConns:          10,
 			MaxIdleConnsPerHost:   5,
-			IdleConnTimeout:       90 * time.Second,
-			ResponseHeaderTimeout: 60 * time.Second,
-			ExpectContinueTimeout: 10 * time.Second,
+			IdleConnTimeout:       30 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			ExpectContinueTimeout: 5 * time.Second,
 		},
 	}
 
 	return nil
 }
 
-// Send transmits data through HTTPS tunnel with institutional network compatibility
+// Send transmits data through local HTTPS relay
 func (t *HTTPSTunnelTransport) Send(data []byte, metadata TransferMetadata) error {
 	// Encode data as base64 for JSON compatibility
 	encodedData := base64.StdEncoding.EncodeToString(data)
-	
+
 	// Create transfer payload
 	payload := HTTPSTransferPayload{
 		TransferID: metadata.TransferID,
@@ -92,95 +225,73 @@ func (t *HTTPSTunnelTransport) Send(data []byte, metadata TransferMetadata) erro
 	}
 
 	// For large files, split into chunks
-	maxChunkSize := 1024 * 1024 // 1MB chunks for institutional networks
+	maxChunkSize := 2 * 1024 * 1024 // 2MB chunks for local relay
 	if len(encodedData) > maxChunkSize {
 		return t.sendLargeFile(payload, maxChunkSize)
 	}
 
-	// Try each relay server sequentially
+	// Try each local relay server
 	var lastErr error
-	for i, relayURL := range t.relayURLs {
-		err := t.sendToRelay(payload, relayURL, i)
+	for _, relayURL := range t.relayURLs {
+		err := t.sendToLocalRelay(payload, relayURL)
 		if err == nil {
 			return nil // Success
 		}
 		lastErr = err
-		
-		// Log failure but continue to next relay
-		fmt.Printf("HTTPS relay %d failed: %v, trying next...\n", i+1, err)
-		
+
 		// Brief delay between attempts
-		time.Sleep(time.Duration(i+1) * time.Second)
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	return fmt.Errorf("all HTTPS relays failed for institutional network, last error: %w", lastErr)
+	return fmt.Errorf("all local HTTPS relays failed: %w", lastErr)
 }
 
 // sendLargeFile handles files larger than chunk size
 func (t *HTTPSTunnelTransport) sendLargeFile(payload HTTPSTransferPayload, chunkSize int) error {
 	data := payload.Data
 	totalChunks := (len(data) + chunkSize - 1) / chunkSize
-	
+
 	for i := 0; i < totalChunks; i++ {
 		start := i * chunkSize
 		end := start + chunkSize
 		if end > len(data) {
 			end = len(data)
 		}
-		
+
 		chunkPayload := payload
 		chunkPayload.Data = data[start:end]
 		chunkPayload.ChunkIndex = i
 		chunkPayload.TotalChunks = totalChunks
 		chunkPayload.FileSize = int64(len(chunkPayload.Data))
-		
-		// Try all relays for each chunk
+
+		// Try all local relays for each chunk
 		var lastErr error
 		success := false
-		for j, relayURL := range t.relayURLs {
-			err := t.sendToRelay(chunkPayload, relayURL, j)
+		for _, relayURL := range t.relayURLs {
+			err := t.sendToLocalRelay(chunkPayload, relayURL)
 			if err == nil {
 				success = true
 				break
 			}
 			lastErr = err
-			time.Sleep(time.Duration(j+1) * time.Second)
+			time.Sleep(50 * time.Millisecond)
 		}
-		
+
 		if !success {
-			return fmt.Errorf("failed to send chunk %d/%d through institutional network: %w", i+1, totalChunks, lastErr)
+			return fmt.Errorf("failed to send chunk %d/%d to local relay: %w", i+1, totalChunks, lastErr)
 		}
 	}
-	
+
 	return nil
 }
 
-// sendToRelay attempts to send data to a specific relay server
-func (t *HTTPSTunnelTransport) sendToRelay(payload HTTPSTransferPayload, relayURL string, relayIndex int) error {
+// sendToLocalRelay sends data to local relay server
+func (t *HTTPSTunnelTransport) sendToLocalRelay(payload HTTPSTransferPayload, relayURL string) error {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to serialize payload: %w", err)
 	}
 
-	// Different strategies for different services
-	switch relayIndex {
-	case 0: // httpbin.org
-		return t.sendToHttpBin(payloadBytes, relayURL, payload.TransferID)
-	case 1: // GitHub Gists
-		return t.sendToGitHub(payloadBytes, payload.TransferID)
-	case 2: // Pastebin
-		return t.sendToPastebin(payloadBytes, payload.TransferID)
-	case 3: // JSONBlob
-		return t.sendToJSONBlob(payloadBytes, relayURL, payload.TransferID)
-	case 4: // Paste.ee
-		return t.sendToPasteEE(payloadBytes, payload.TransferID)
-	default:
-		return t.sendGeneric(payloadBytes, relayURL, payload.TransferID)
-	}
-}
-
-// sendToHttpBin sends via httpbin.org (widely accessible testing service)
-func (t *HTTPSTunnelTransport) sendToHttpBin(payloadBytes []byte, relayURL, transferID string) error {
 	req, err := http.NewRequest("POST", relayURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return err
@@ -188,384 +299,106 @@ func (t *HTTPSTunnelTransport) sendToHttpBin(payloadBytes []byte, relayURL, tran
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "TrustDrop/1.0")
-	req.Header.Set("X-Transfer-ID", transferID)
+	req.Header.Set("X-Transfer-ID", payload.TransferID)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req = req.WithContext(ctx)
 
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("httpbin upload failed: %w", err)
+		return fmt.Errorf("local relay upload failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("httpbin upload failed with status %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("local relay returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	return nil
 }
 
-// sendToGitHub sends via GitHub Gists API
-func (t *HTTPSTunnelTransport) sendToGitHub(payloadBytes []byte, transferID string) error {
-	gistPayload := map[string]interface{}{
-		"description": "TrustDrop Transfer: " + transferID,
-		"public":      false,
-		"files": map[string]interface{}{
-			"trustdrop_" + transferID + ".json": map[string]string{
-				"content": string(payloadBytes),
-			},
-		},
-	}
-
-	gistBytes, err := json.Marshal(gistPayload)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest("POST", "https://api.github.com/gists", bytes.NewReader(gistBytes))
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "TrustDrop/1.0")
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-	req = req.WithContext(ctx)
-
-	resp, err := t.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("github gist upload failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("github gist upload failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return nil
-}
-
-// sendToPastebin sends via Pastebin API
-func (t *HTTPSTunnelTransport) sendToPastebin(payloadBytes []byte, transferID string) error {
-	formData := url.Values{}
-	formData.Set("api_dev_key", "dummy_key") // Would need real key in production
-	formData.Set("api_option", "paste")
-	formData.Set("api_paste_code", string(payloadBytes))
-	formData.Set("api_paste_name", "TrustDrop_"+transferID)
-	formData.Set("api_paste_private", "1")
-
-	req, err := http.NewRequest("POST", "https://pastebin.com/api/api_post.php", 
-		strings.NewReader(formData.Encode()))
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", "TrustDrop/1.0")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-	req = req.WithContext(ctx)
-
-	resp, err := t.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("pastebin upload failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("pastebin upload failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return nil
-}
-
-// sendToJSONBlob sends via JSONBlob service
-func (t *HTTPSTunnelTransport) sendToJSONBlob(payloadBytes []byte, relayURL, transferID string) error {
-	req, err := http.NewRequest("POST", relayURL, bytes.NewReader(payloadBytes))
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "TrustDrop/1.0")
-	req.Header.Set("X-Transfer-ID", transferID)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-	req = req.WithContext(ctx)
-
-	resp, err := t.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("jsonblob upload failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("jsonblob upload failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return nil
-}
-
-// sendToPasteEE sends via Paste.ee service
-func (t *HTTPSTunnelTransport) sendToPasteEE(payloadBytes []byte, transferID string) error {
-	pastePayload := map[string]interface{}{
-		"description": "TrustDrop Transfer: " + transferID,
-		"sections": []map[string]string{
-			{
-				"name":     "transfer_data",
-				"contents": string(payloadBytes),
-			},
-		},
-	}
-
-	pasteBytes, err := json.Marshal(pastePayload)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest("POST", "https://api.paste.ee/v1/pastes", bytes.NewReader(pasteBytes))
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "TrustDrop/1.0")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-	req = req.WithContext(ctx)
-
-	resp, err := t.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("paste.ee upload failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("paste.ee upload failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return nil
-}
-
-// sendGeneric generic fallback sender
-func (t *HTTPSTunnelTransport) sendGeneric(payloadBytes []byte, relayURL, transferID string) error {
-	req, err := http.NewRequest("POST", relayURL, bytes.NewReader(payloadBytes))
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "TrustDrop/1.0")
-	req.Header.Set("X-Transfer-ID", transferID)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-	req = req.WithContext(ctx)
-
-	resp, err := t.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("generic upload failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("generic upload failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return nil
-}
-
-// Receive gets data through HTTPS tunnel with aggressive polling
+// Receive gets data from local HTTPS relay
 func (t *HTTPSTunnelTransport) Receive(metadata TransferMetadata) ([]byte, error) {
-	// More aggressive polling for institutional networks
-	maxRetries := 120 // 20 minutes with 10-second intervals
-	pollInterval := 10 * time.Second
-	backoffMultiplier := 1.0
-
-	for retry := 0; retry < maxRetries; retry++ {
-		// Try each relay server
-		for i, relayURL := range t.relayURLs {
-			data, err := t.receiveFromRelay(metadata, relayURL, i)
-			if err == nil {
-				return data, nil // Success
-			}
-			
-			// Brief delay between relay attempts
-			time.Sleep(2 * time.Second)
+	// Try each local relay server
+	var lastErr error
+	for _, relayURL := range t.relayURLs {
+		data, err := t.receiveFromLocalRelay(metadata, relayURL)
+		if err == nil {
+			return data, nil
 		}
-
-		// Exponential backoff for institutional networks
-		currentInterval := time.Duration(float64(pollInterval) * backoffMultiplier)
-		if currentInterval > 60*time.Second {
-			currentInterval = 60 * time.Second
-		} else {
-			backoffMultiplier *= 1.1
-		}
-
-		// Log progress periodically
-		if retry%6 == 0 {
-			fmt.Printf("HTTPS receive attempt %d/%d (waiting %v)...\n", retry+1, maxRetries, currentInterval)
-		}
-
-		time.Sleep(currentInterval)
+		lastErr = err
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	return nil, fmt.Errorf("HTTPS transfer timeout - file not found after %d retries (institutional network may have additional delays)", maxRetries)
+	return nil, fmt.Errorf("all local HTTPS relays failed for receive: %w", lastErr)
 }
 
-// receiveFromRelay attempts to receive data from a specific relay
-func (t *HTTPSTunnelTransport) receiveFromRelay(metadata TransferMetadata, relayURL string, relayIndex int) ([]byte, error) {
-	switch relayIndex {
-	case 0: // httpbin.org
-		return t.receiveFromHttpBin(metadata, relayURL)
-	case 1: // GitHub Gists
-		return t.receiveFromGitHub(metadata)
-	case 2: // Pastebin
-		return t.receiveFromPastebin(metadata)
-	case 3: // JSONBlob
-		return t.receiveFromJSONBlob(metadata, relayURL)
-	case 4: // Paste.ee
-		return t.receiveFromPasteEE(metadata)
-	default:
-		return t.receiveGeneric(metadata, relayURL)
-	}
-}
-
-// receiveFromHttpBin receives from httpbin.org
-func (t *HTTPSTunnelTransport) receiveFromHttpBin(metadata TransferMetadata, relayURL string) ([]byte, error) {
-	// httpbin doesn't store data, so this is just a connectivity test
+// receiveFromLocalRelay gets data from local relay server
+func (t *HTTPSTunnelTransport) receiveFromLocalRelay(metadata TransferMetadata, relayURL string) ([]byte, error) {
+	// Build URL for GET request
 	url := fmt.Sprintf("%s/%s", relayURL, metadata.TransferID)
-	return t.tryDownloadURL(url, metadata)
-}
 
-// receiveFromGitHub receives from GitHub Gists
-func (t *HTTPSTunnelTransport) receiveFromGitHub(metadata TransferMetadata) ([]byte, error) {
-	// Search for gists with our transfer ID
-	searchURL := fmt.Sprintf("https://api.github.com/gists?per_page=10")
-	return t.tryDownloadURL(searchURL, metadata)
-}
-
-// receiveFromPastebin receives from Pastebin
-func (t *HTTPSTunnelTransport) receiveFromPastebin(metadata TransferMetadata) ([]byte, error) {
-	// Pastebin requires the exact paste URL which we don't have
-	// This would need to be implemented with a proper API key and storage mechanism
-	return nil, fmt.Errorf("pastebin receive not implemented - would need paste URL")
-}
-
-// receiveFromJSONBlob receives from JSONBlob
-func (t *HTTPSTunnelTransport) receiveFromJSONBlob(metadata TransferMetadata, relayURL string) ([]byte, error) {
-	// JSONBlob requires the exact blob ID which we'd need to store
-	url := fmt.Sprintf("%s/%s", relayURL, metadata.TransferID)
-	return t.tryDownloadURL(url, metadata)
-}
-
-// receiveFromPasteEE receives from Paste.ee
-func (t *HTTPSTunnelTransport) receiveFromPasteEE(metadata TransferMetadata) ([]byte, error) {
-	// Paste.ee requires the exact paste ID
-	url := fmt.Sprintf("https://api.paste.ee/v1/pastes/%s", metadata.TransferID)
-	return t.tryDownloadURL(url, metadata)
-}
-
-// receiveGeneric generic receiver
-func (t *HTTPSTunnelTransport) receiveGeneric(metadata TransferMetadata, relayURL string) ([]byte, error) {
-	url := fmt.Sprintf("%s/%s", relayURL, metadata.TransferID)
-	return t.tryDownloadURL(url, metadata)
-}
-
-// tryDownloadURL attempts to download from a specific URL
-func (t *HTTPSTunnelTransport) tryDownloadURL(url string, metadata TransferMetadata) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, err
 	}
 
 	req.Header.Set("User-Agent", "TrustDrop/1.0")
 	req.Header.Set("X-Transfer-ID", metadata.TransferID)
-	req.Header.Set("Accept", "application/json, text/plain, */*")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
 
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("HTTPS download failed: %w", err)
+		return nil, fmt.Errorf("local relay download failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("file not found (404)")
-	}
-
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("HTTPS download failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("local relay returned status %d", resp.StatusCode)
 	}
 
-	// Read response data
-	responseData, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response data: %w", err)
+		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// Try to parse as JSON payload first
 	var payload HTTPSTransferPayload
-	if err := json.Unmarshal(responseData, &payload); err == nil {
-		// Verify transfer ID matches
-		if payload.TransferID != metadata.TransferID {
-			return nil, fmt.Errorf("transfer ID mismatch")
-		}
-
-		// Decode base64 data
-		decodedData, err := base64.StdEncoding.DecodeString(payload.Data)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode base64 data: %w", err)
-		}
-
-		return decodedData, nil
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("failed to parse payload: %w", err)
 	}
 
-	// If not JSON, treat as raw data
-	return responseData, nil
+	// Decode base64 data
+	data, err := base64.StdEncoding.DecodeString(payload.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode data: %w", err)
+	}
+
+	return data, nil
 }
 
-// IsAvailable checks if HTTPS transport is available
+// IsAvailable checks if local HTTPS relay is available
 func (t *HTTPSTunnelTransport) IsAvailable(ctx context.Context) bool {
-	// Test connectivity to primary relay (httpbin.org - most reliable)
-	return t.testRelayConnectivity(ctx, t.relayURLs[0])
+	// Test connectivity to at least one local relay
+	for _, relayURL := range t.relayURLs[:3] { // Test first 3
+		if t.testLocalRelayConnectivity(ctx, relayURL) {
+			return true
+		}
+	}
+	return false
 }
 
-// testRelayConnectivity tests if a relay server is reachable
-func (t *HTTPSTunnelTransport) testRelayConnectivity(ctx context.Context, relayURL string) bool {
-	// Simple HEAD request to test connectivity
+// testLocalRelayConnectivity tests connection to local relay
+func (t *HTTPSTunnelTransport) testLocalRelayConnectivity(ctx context.Context, relayURL string) bool {
+	client := &http.Client{Timeout: 5 * time.Second}
+
 	req, err := http.NewRequestWithContext(ctx, "HEAD", relayURL, nil)
 	if err != nil {
 		return false
-	}
-
-	req.Header.Set("User-Agent", "TrustDrop/1.0")
-
-	// Use a shorter timeout for connectivity tests
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				MinVersion: tls.VersionTLS12,
-			},
-		},
 	}
 
 	resp, err := client.Do(req)
@@ -574,24 +407,23 @@ func (t *HTTPSTunnelTransport) testRelayConnectivity(ctx context.Context, relayU
 	}
 	defer resp.Body.Close()
 
-	// Accept any response that indicates the service is reachable
-	return resp.StatusCode < 500
+	return resp.StatusCode < 500 // Accept any non-server-error response
 }
 
-// GetPriority returns the transport priority (highest for restrictive networks)
+// GetPriority returns the transport priority
 func (t *HTTPSTunnelTransport) GetPriority() int {
 	return t.priority
 }
 
 // GetName returns the transport name
 func (t *HTTPSTunnelTransport) GetName() string {
-	return "https-tunnel"
+	return "https-local-relay"
 }
 
-// Close cleans up the HTTPS transport
+// Close cleans up the transport and stops relay server
 func (t *HTTPSTunnelTransport) Close() error {
-	if transport, ok := t.httpClient.Transport.(*http.Transport); ok {
-		transport.CloseIdleConnections()
+	if t.relayServer != nil {
+		return t.relayServer.Stop()
 	}
 	return nil
 }

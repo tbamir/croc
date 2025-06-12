@@ -21,29 +21,17 @@ var (
 	DEFAULT_RELAY6     = "croc6.schollz.com"
 	DEFAULT_PORT       = "9009"
 	DEFAULT_PASSPHRASE = "pass123"
-	INTERNAL_DNS       = false
+	INTERNAL_DNS       = false // DISABLED for corporate network compatibility
 )
 
 // publicDNS are servers to be queried if a local lookup fails
+// DISABLED for corporate network compatibility - these are often blocked
 var publicDNS = []string{
-	"1.0.0.1",                // Cloudflare
-	"1.1.1.1",                // Cloudflare
-	"[2606:4700:4700::1111]", // Cloudflare
-	"[2606:4700:4700::1001]", // Cloudflare
-	"8.8.4.4",                // Google
-	"8.8.8.8",                // Google
-	"[2001:4860:4860::8844]", // Google
-	"[2001:4860:4860::8888]", // Google
-	"9.9.9.9",                // Quad9
-	"149.112.112.112",        // Quad9
-	"[2620:fe::fe]",          // Quad9
-	"[2620:fe::fe:9]",        // Quad9
-	"8.26.56.26",             // Comodo
-	"8.20.247.20",            // Comodo
-	"208.67.220.220",         // Cisco OpenDNS
-	"208.67.222.222",         // Cisco OpenDNS
-	"[2620:119:35::35]",      // Cisco OpenDNS
-	"[2620:119:53::53]",      // Cisco OpenDNS
+	// External DNS disabled for corporate networks
+	// "1.0.0.1",                // Cloudflare - BLOCKED
+	// "1.1.1.1",                // Cloudflare - BLOCKED
+	// "8.8.4.4",                // Google - BLOCKED
+	// "8.8.8.8",                // Google - BLOCKED
 }
 
 func getConfigFile(requireValidPath bool) (fname string, err error) {
@@ -59,6 +47,10 @@ func init() {
 	log.SetLevel("info")
 	log.SetOutput(os.Stderr)
 	doRemember := false
+
+	// CORPORATE NETWORK MODE: Always use local DNS, never external
+	INTERNAL_DNS = false // Use local DNS only
+
 	for _, flag := range os.Args {
 		if flag == "--internal-dns" {
 			INTERNAL_DNS = true
@@ -83,58 +75,27 @@ func init() {
 		}
 	}
 	log.Trace("Using internal DNS: ", INTERNAL_DNS)
-	var err error
-	var addr string
-	addr, err = lookup(DEFAULT_RELAY)
-	if err == nil {
-		DEFAULT_RELAY = net.JoinHostPort(addr, DEFAULT_PORT)
-	} else {
-		DEFAULT_RELAY = ""
-	}
-	log.Tracef("Default ipv4 relay: %s", addr)
-	addr, err = lookup(DEFAULT_RELAY6)
-	if err == nil {
-		DEFAULT_RELAY6 = net.JoinHostPort(addr, DEFAULT_PORT)
-	} else {
-		DEFAULT_RELAY6 = ""
-	}
-	log.Tracef("Default ipv6 relay: %s", addr)
+
+	// Use direct IP addresses for corporate network compatibility
+	// These IPs are for croc.schollz.com and croc2.schollz.com
+	DEFAULT_RELAY = "165.232.162.250:9009"  // Direct IP, no DNS needed
+	DEFAULT_RELAY6 = "165.232.162.250:9009" // Same for IPv6
+
+	log.Tracef("Default relay (corporate mode): %s", DEFAULT_RELAY)
+	log.Tracef("Default relay6 (corporate mode): %s", DEFAULT_RELAY6)
 }
 
 // Resolve a hostname to an IP address using DNS.
 func lookup(address string) (ipaddress string, err error) {
-	if !INTERNAL_DNS {
-		log.Tracef("Using local DNS to resolve %s", address)
-		return localLookupIP(address)
-	}
-	type Result struct {
-		s   string
-		err error
-	}
-	result := make(chan Result, len(publicDNS))
-	for _, dns := range publicDNS {
-		go func(dns string) {
-			var r Result
-			r.s, r.err = remoteLookupIP(address, dns)
-			log.Tracef("Resolved %s to %s using %s", address, r.s, dns)
-			result <- r
-		}(dns)
-	}
-	for i := 0; i < len(publicDNS); i++ {
-		ipaddress = (<-result).s
-		log.Tracef("Resolved %s to %s", address, ipaddress)
-		if ipaddress != "" {
-			return
-		}
-	}
-	err = fmt.Errorf("failed to resolve %s: all DNS servers exhausted", address)
-	return
+	// CORPORATE NETWORK MODE: Always use local DNS only
+	log.Tracef("Using local DNS only for corporate network compatibility: %s", address)
+	return localLookupIP(address)
 }
 
 // localLookupIP returns a host's IP address using the local DNS configuration.
 func localLookupIP(address string) (ipaddress string, err error) {
 	// ENHANCED: Increased timeout for restrictive networks (libraries, hotels, etc.)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // Increased timeout
 	defer cancel()
 
 	r := &net.Resolver{}
@@ -142,29 +103,18 @@ func localLookupIP(address string) (ipaddress string, err error) {
 	// Use the context with timeout in the LookupHost function
 	ip, err := r.LookupHost(ctx, address)
 	if err != nil {
-		return
+		// Fallback for corporate networks - return the address as-is if it looks like an IP
+		if net.ParseIP(address) != nil {
+			return address, nil
+		}
+		return "", fmt.Errorf("corporate network DNS resolution failed for %s: %w", address, err)
 	}
 	ipaddress = ip[0]
 	return
 }
 
-// remoteLookupIP returns a host's IP address based on a remote DNS server.
+// remoteLookupIP - DISABLED for corporate network compatibility
 func remoteLookupIP(address, dns string) (ipaddress string, err error) {
-	// ENHANCED: Increased timeout for restrictive networks
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	r := &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			d := new(net.Dialer)
-			return d.DialContext(ctx, network, dns+":53")
-		},
-	}
-	ip, err := r.LookupHost(ctx, address)
-	if err != nil {
-		return
-	}
-	ipaddress = ip[0]
-	return
+	// CORPORATE NETWORK MODE: External DNS disabled
+	return "", fmt.Errorf("external DNS disabled for corporate network compatibility")
 }

@@ -51,10 +51,10 @@ type BulletproofTransferManager struct {
 	cancelFunction context.CancelFunc
 
 	// Network adaptation
-	networkProfile     transport.NetworkProfile
+	networkProfile      transport.NetworkProfile
 	networkRestrictions []transport.NetworkRestriction
-	adaptiveSettings   AdaptiveSettings
-	lastNetworkCheck   time.Time
+	adaptiveSettings    AdaptiveSettings
+	lastNetworkCheck    time.Time
 }
 
 // AdaptiveSettings contains settings that adapt based on network conditions
@@ -77,41 +77,46 @@ type RetryStrategy struct {
 
 // TransferResult contains the result of a transfer operation
 type TransferResult struct {
-	Success            bool
-	TransferredFiles   []string
-	TotalBytes         int64
-	Duration           time.Duration
-	TransportUsed      string
-	EncryptionMode     security.EncryptionMode
-	IntegrityVerified  bool
+	Success             bool
+	TransferredFiles    []string
+	TotalBytes          int64
+	Duration            time.Duration
+	TransportUsed       string
+	EncryptionMode      security.EncryptionMode
+	IntegrityVerified   bool
 	NetworkRestrictions []transport.NetworkRestriction
-	NetworkType        string
-	Error              error
+	NetworkType         string
+	Error               error
 }
 
 // NewBulletproofTransferManager creates a production-ready transfer manager
 func NewBulletproofTransferManager(targetDataDir string) (*BulletproofTransferManager, error) {
-	// Initialize transport manager with enhanced config for institutional networks
+	// Initialize transport manager with CORPORATE NETWORK CONFIG
 	transportConfig := transport.TransportConfig{
 		RelayServers: []string{
-			// Primary institutional-friendly relays
+			// CORPORATE NETWORK PRIORITY: Direct IPs with standard web ports
+			"165.232.162.250:443",  // HTTPS port - most likely to work
+			"165.232.162.250:80",   // HTTP port - second most likely
+			"165.232.162.250:9009", // Standard CROC port
+			"165.232.162.250:9010", // Alternative CROC port
+
+			// Fallback to domain names (may fail in corporate networks)
 			"croc.schollz.com:443",  // HTTPS port
 			"croc2.schollz.com:443", // HTTPS port
 			"croc.schollz.com:80",   // HTTP port
 			"croc2.schollz.com:80",  // HTTP port
-			// Fallback to standard ports
 			"croc.schollz.com:9009",
 			"croc2.schollz.com:9009",
 		},
-		Timeout: 60 * time.Second, // Extended timeout for institutional networks
+		Timeout: 90 * time.Second, // Extended timeout for corporate networks with potential proxy delays
 	}
 
-	fmt.Printf("Creating production-ready transport manager...\n")
+	fmt.Printf("Creating corporate-network-ready transfer manager...\n")
 	transportManager, err := transport.NewMultiTransportManager(transportConfig)
 	if err != nil {
-		// Continue with limited functionality rather than failing
+		// Continue with limited functionality rather than failing completely
 		fmt.Printf("Transport manager had initialization issues: %v\n", err)
-		fmt.Printf("Will continue with available transports\n")
+		fmt.Printf("Will continue with available transports (some may work)\n")
 	}
 
 	fmt.Printf("Initializing advanced security system...\n")
@@ -126,32 +131,32 @@ func NewBulletproofTransferManager(targetDataDir string) (*BulletproofTransferMa
 		blockchain:       nil, // Will be initialized if needed
 		logger:           nil, // Will be initialized if needed
 		targetDataDir:    targetDataDir,
-		maxRetries:       12,  // Increased for institutional networks
-		retryDelay:       5 * time.Second,
-		chunkSize:        8 * 1024 * 1024, // 8MB chunks for reliability
+		maxRetries:       15,              // Increased for corporate networks with potential delays
+		retryDelay:       8 * time.Second, // Longer delays for corporate networks
+		chunkSize:        4 * 1024 * 1024, // 4MB chunks for stability over reliability
 		resumeSupport:    true,
 		integrityChecks:  true,
 		cancelContext:    ctx,
 		cancelFunction:   cancel,
 		adaptiveSettings: AdaptiveSettings{
-			TimeoutMultiplier:  2.0, // Conservative for institutional networks
-			ChunkSizeBytes:     8 * 1024 * 1024,
-			MaxConcurrentFiles: 2,   // Conservative for stability
-			PreferredTransport: "https-tunnel",
+			TimeoutMultiplier:  2.5, // Very conservative for corporate networks
+			ChunkSizeBytes:     4 * 1024 * 1024,
+			MaxConcurrentFiles: 1,                   // Ultra-conservative for corporate stability
+			PreferredTransport: "https-local-relay", // Prioritize local relay
 			RetryStrategy: RetryStrategy{
-				MaxAttempts:   12, // Increased for network reliability
-				InitialDelay:  5 * time.Second,
-				BackoffFactor: 1.5,
-				MaxDelay:      60 * time.Second,
+				MaxAttempts:   15, // Increased for corporate network reliability
+				InitialDelay:  8 * time.Second,
+				BackoffFactor: 1.3,
+				MaxDelay:      90 * time.Second,
 				JitterEnabled: true,
 			},
 		},
 	}
 
-	// Initialize network monitoring
+	// Initialize network monitoring for corporate environments
 	btm.initializeNetworkMonitoring()
 
-	fmt.Printf("Production-ready transfer manager initialized\n")
+	fmt.Printf("Corporate-network-ready transfer manager initialized\n")
 	return btm, nil
 }
 
@@ -159,7 +164,7 @@ func NewBulletproofTransferManager(targetDataDir string) (*BulletproofTransferMa
 func (btm *BulletproofTransferManager) initializeNetworkMonitoring() {
 	// Start with conservative defaults for institutional networks
 	btm.networkProfile = transport.NetworkProfile{
-		IsRestrictive:      true,  // Assume restrictive until proven otherwise
+		IsRestrictive:      true, // Assume restrictive until proven otherwise
 		AvailablePorts:     []int{80, 443},
 		NetworkType:        "institutional",
 		PreferredTransport: "https-tunnel",
@@ -169,11 +174,11 @@ func (btm *BulletproofTransferManager) initializeNetworkMonitoring() {
 	go func() {
 		time.Sleep(1 * time.Second) // Brief delay for initialization
 		btm.updateNetworkProfile()
-		
+
 		// Periodic network monitoring
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-btm.cancelContext.Done():
@@ -190,12 +195,12 @@ func (btm *BulletproofTransferManager) initializeNetworkMonitoring() {
 // updateNetworkProfile gets current network status from transport manager
 func (btm *BulletproofTransferManager) updateNetworkProfile() {
 	btm.lastNetworkCheck = time.Now()
-	
+
 	if btm.transportManager != nil {
 		btm.networkProfile = btm.transportManager.GetNetworkProfile()
 		btm.networkRestrictions = btm.transportManager.GetNetworkRestrictions()
 		btm.adaptSettingsToNetwork()
-		
+
 		// Update user about significant network changes
 		if len(btm.networkRestrictions) > 0 {
 			restrictionDesc := btm.getNetworkRestrictionsDescription()
@@ -212,7 +217,7 @@ func (btm *BulletproofTransferManager) getNetworkRestrictionsDescription() strin
 
 	criticalCount := 0
 	highSeverityCount := 0
-	
+
 	for _, restriction := range btm.networkRestrictions {
 		switch restriction.Severity {
 		case "critical":
@@ -315,11 +320,11 @@ func (btm *BulletproofTransferManager) SendFiles(filePaths []string, transferCod
 
 	successMsg := fmt.Sprintf("Transfer completed successfully! %d files (%s) in %v",
 		len(result.TransferredFiles), btm.formatBytes(result.TotalBytes), result.Duration)
-	
+
 	if btm.networkProfile.IsRestrictive {
 		successMsg += " via institutional-compatible transport"
 	}
-	
+
 	btm.updateStatus(successMsg)
 	return result, nil
 }
@@ -394,11 +399,11 @@ func (btm *BulletproofTransferManager) ReceiveFiles(transferCode string) (*Trans
 
 	successMsg := fmt.Sprintf("Transfer completed successfully! %d files (%s) in %v",
 		len(result.TransferredFiles), btm.formatBytes(result.TotalBytes), result.Duration)
-	
+
 	if btm.networkProfile.IsRestrictive {
 		successMsg += " via institutional-compatible transport"
 	}
-	
+
 	btm.updateStatus(successMsg)
 	return result, nil
 }
@@ -436,18 +441,18 @@ func (btm *BulletproofTransferManager) provideConnectionGuidance() {
 // receiveWithInstitutionalNetworkSupport performs receive with institutional network optimization
 func (btm *BulletproofTransferManager) receiveWithInstitutionalNetworkSupport(metadata transport.TransferMetadata) ([]byte, error) {
 	strategy := btm.adaptiveSettings.RetryStrategy
-	
+
 	// Extended retry logic for institutional networks
 	maxAttempts := strategy.MaxAttempts
 	if btm.networkProfile.IsRestrictive {
 		maxAttempts = int(float64(maxAttempts) * 1.5) // 50% more attempts for institutional networks
 	}
-	
+
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		// Update status with institutional network context
 		if attempt > 1 {
 			if btm.networkProfile.IsRestrictive {
-				btm.updateStatus(fmt.Sprintf("Connection attempt %d/%d (institutional network may require additional time)...", 
+				btm.updateStatus(fmt.Sprintf("Connection attempt %d/%d (institutional network may require additional time)...",
 					attempt, maxAttempts))
 			} else {
 				btm.updateStatus(fmt.Sprintf("Connection attempt %d/%d...", attempt, maxAttempts))
@@ -514,7 +519,7 @@ func (btm *BulletproofTransferManager) isInstitutionalNetworkError(err error) bo
 	if err == nil {
 		return false
 	}
-	
+
 	errorStr := strings.ToLower(err.Error())
 	institutionalErrorIndicators := []string{
 		"connection refused", "timeout", "network unreachable", "no route to host",
@@ -522,13 +527,13 @@ func (btm *BulletproofTransferManager) isInstitutionalNetworkError(err error) bo
 		"proxy", "institutional", "corporate", "university", "managed network",
 		"policy", "restricted", "filtered", "deep packet inspection", "dpi",
 	}
-	
+
 	for _, indicator := range institutionalErrorIndicators {
 		if strings.Contains(errorStr, indicator) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -562,12 +567,12 @@ func (btm *BulletproofTransferManager) enhanceErrorMessage(err error, filePath s
 	}
 
 	var enhancedMsg strings.Builder
-	
+
 	// Check if this is an institutional network-related error
 	if btm.isInstitutionalNetworkError(err) {
 		if btm.networkProfile.IsRestrictive {
 			enhancedMsg.WriteString("Transfer failed due to institutional network restrictions.\n\n")
-			
+
 			switch btm.networkProfile.NetworkType {
 			case "corporate":
 				enhancedMsg.WriteString("Your corporate network has strict security policies that block ")
@@ -579,16 +584,16 @@ func (btm *BulletproofTransferManager) enhanceErrorMessage(err error, filePath s
 				enhancedMsg.WriteString("Your managed network has IT policies that block ")
 				enhancedMsg.WriteString("direct file transfer protocols.\n\n")
 			}
-			
+
 			if len(btm.networkRestrictions) > 0 {
 				enhancedMsg.WriteString("Detected network restrictions:\n")
 				for _, restriction := range btm.networkRestrictions {
-					enhancedMsg.WriteString(fmt.Sprintf("• %s: %s\n", 
+					enhancedMsg.WriteString(fmt.Sprintf("• %s: %s\n",
 						strings.Title(restriction.Type), restriction.Description))
 				}
 				enhancedMsg.WriteString("\n")
 			}
-			
+
 			enhancedMsg.WriteString("Recommended solutions:\n")
 			enhancedMsg.WriteString("• Try from a different network (mobile hotspot, home WiFi)\n")
 			enhancedMsg.WriteString("• Contact your IT department about approved file transfer methods\n")
@@ -613,14 +618,14 @@ func (btm *BulletproofTransferManager) enhanceErrorMessage(err error, filePath s
 		enhancedMsg.WriteString("• Try restarting the application\n")
 		enhancedMsg.WriteString("• Check available disk space on the receiving device\n")
 	}
-	
+
 	if filePath != "" {
 		enhancedMsg.WriteString(fmt.Sprintf("\nFile: %s", filePath))
 	}
-	
+
 	enhancedMsg.WriteString(fmt.Sprintf("\nNetwork Type: %s", btm.networkProfile.NetworkType))
 	enhancedMsg.WriteString(fmt.Sprintf("\nTechnical Details: %v", err))
-	
+
 	return fmt.Errorf("%s", enhancedMsg.String())
 }
 
@@ -629,33 +634,33 @@ func (btm *BulletproofTransferManager) simplifyErrorMessage(err error) string {
 	if err == nil {
 		return ""
 	}
-	
+
 	errorStr := err.Error()
-	
+
 	// Replace technical terms with user-friendly ones
 	replacements := map[string]string{
-		"dial tcp":               "connection failed",
-		"connection refused":     "connection blocked by network",
-		"i/o timeout":           "connection timeout",
-		"network unreachable":   "network not accessible",
-		"no route to host":      "destination unreachable",
-		"connection reset":      "connection interrupted by network",
-		"institutional":         "managed network",
-		"corporate":             "business network",
-		"university":            "educational network",
+		"dial tcp":            "connection failed",
+		"connection refused":  "connection blocked by network",
+		"i/o timeout":         "connection timeout",
+		"network unreachable": "network not accessible",
+		"no route to host":    "destination unreachable",
+		"connection reset":    "connection interrupted by network",
+		"institutional":       "managed network",
+		"corporate":           "business network",
+		"university":          "educational network",
 	}
-	
+
 	for technical, friendly := range replacements {
 		if strings.Contains(strings.ToLower(errorStr), technical) {
 			return friendly
 		}
 	}
-	
+
 	// If no simplification found, return original but truncated
 	if len(errorStr) > 100 {
 		return errorStr[:97] + "..."
 	}
-	
+
 	return errorStr
 }
 
@@ -664,7 +669,7 @@ func (btm *BulletproofTransferManager) getUsedTransportName() string {
 	if btm.transportManager == nil {
 		return "unknown"
 	}
-	
+
 	// Get transport status to find which was successful
 	status := btm.transportManager.GetTransportStatus()
 	for name, transportStatus := range status {
@@ -676,7 +681,7 @@ func (btm *BulletproofTransferManager) getUsedTransportName() string {
 			}
 		}
 	}
-	
+
 	return "auto-selected"
 }
 
@@ -690,7 +695,7 @@ func (btm *BulletproofTransferManager) adaptSettingsToNetwork() {
 		btm.adaptiveSettings.ChunkSizeBytes = 4 * 1024 * 1024 // 4MB chunks for institutional networks
 		btm.adaptiveSettings.MaxConcurrentFiles = 1
 		btm.adaptiveSettings.PreferredTransport = "https-tunnel"
-		btm.adaptiveSettings.RetryStrategy.MaxAttempts = 15    // More retries
+		btm.adaptiveSettings.RetryStrategy.MaxAttempts = 15 // More retries
 		btm.adaptiveSettings.RetryStrategy.InitialDelay = 7 * time.Second
 		btm.adaptiveSettings.RetryStrategy.MaxDelay = 90 * time.Second
 	} else {
@@ -713,7 +718,7 @@ func (btm *BulletproofTransferManager) calculateTotalSizeWithProgress(filePaths 
 	var totalSize int64
 	for i, filePath := range filePaths {
 		btm.updateStatus(fmt.Sprintf("Analyzing file %d/%d: %s", i+1, len(filePaths), filepath.Base(filePath)))
-		
+
 		info, err := os.Stat(filePath)
 		if err != nil {
 			return 0, fmt.Errorf("failed to analyze file %s: %w", filePath, err)
@@ -736,8 +741,8 @@ func (btm *BulletproofTransferManager) processReceivedDataWithMetadata(encrypted
 
 	// Try different encryption modes for maximum compatibility
 	modes := []security.EncryptionMode{
-		security.ModeCBC,    // Most compatible
-		security.ModeGCM,    // Modern authenticated
+		security.ModeCBC,      // Most compatible
+		security.ModeGCM,      // Modern authenticated
 		security.ModeChaCha20, // High security
 		security.ModeHybrid,   // Future-proof
 	}
@@ -775,7 +780,7 @@ func (btm *BulletproofTransferManager) processReceivedDataWithMetadata(encrypted
 		// Single file with embedded filename
 		filename := btm.sanitizeFilename(filePayload.OriginalName)
 		filePath := filepath.Join(receivedDir, filename)
-		
+
 		if err := os.WriteFile(filePath, filePayload.Data, 0644); err != nil {
 			return nil, 0, fmt.Errorf("failed to write received file: %w", err)
 		}
@@ -805,18 +810,18 @@ func (btm *BulletproofTransferManager) processReceivedDataWithMetadata(encrypted
 func (btm *BulletproofTransferManager) sanitizeFilename(filename string) string {
 	// Remove path components and dangerous characters
 	filename = filepath.Base(filename)
-	
+
 	// Replace dangerous characters
 	dangerous := []string{"..", "/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
 	for _, char := range dangerous {
 		filename = strings.ReplaceAll(filename, char, "_")
 	}
-	
+
 	// Ensure filename isn't empty
 	if filename == "" || filename == "." || filename == ".." {
 		filename = fmt.Sprintf("received_file_%d", time.Now().Unix())
 	}
-	
+
 	return filename
 }
 
@@ -857,7 +862,7 @@ func (btm *BulletproofTransferManager) processFileManifestWithProgress(manifest 
 	processedCount := 0
 	for _, fileInfo := range manifest.Files {
 		processedCount++
-		
+
 		// Sanitize the relative path
 		relativePath := btm.sanitizeFilename(fileInfo.RelativePath)
 		fullPath := filepath.Join(baseDir, relativePath)
@@ -990,7 +995,7 @@ func (btm *BulletproofTransferManager) processFolder(folderPath, transferCode st
 				manifest.TotalSize += int64(len(data))
 			} else {
 				// For larger files, store metadata only
-				btm.updateStatus(fmt.Sprintf("Large file detected: %s (%s) - adding metadata only", 
+				btm.updateStatus(fmt.Sprintf("Large file detected: %s (%s) - adding metadata only",
 					relPath, btm.formatBytes(info.Size())))
 
 				if file, err := os.Open(path); err == nil {
@@ -1156,7 +1161,7 @@ func (btm *BulletproofTransferManager) GetNetworkStatus() map[string]interface{}
 		"network_profile":      btm.networkProfile,
 		"network_restrictions": btm.networkRestrictions,
 		"adaptive_settings":    btm.adaptiveSettings,
-		"last_check":          btm.lastNetworkCheck,
+		"last_check":           btm.lastNetworkCheck,
 	}
 
 	if btm.transportManager != nil {

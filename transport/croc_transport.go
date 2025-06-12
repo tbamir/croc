@@ -23,21 +23,31 @@ type EnhancedCrocTransport struct {
 // Setup initializes the enhanced croc transport
 func (t *EnhancedCrocTransport) Setup(config TransportConfig) error {
 	t.config = config
+
+	// CORPORATE NETWORK FRIENDLY: Prioritize standard web ports
 	t.relays = []string{
+		// Direct IP addresses to avoid DNS issues in corporate networks
+		"165.232.162.250:443",  // HTTPS port - most likely to work
+		"165.232.162.250:80",   // HTTP port - second most likely
+		"165.232.162.250:9009", // Standard CROC port
+		"165.232.162.250:9010", // Alternative CROC port
+
+		// Fallback to domain names (may fail in corporate networks)
+		"croc.schollz.com:443",
+		"croc2.schollz.com:443",
+		"croc.schollz.com:80",
+		"croc2.schollz.com:80",
 		"croc.schollz.com:9009",
 		"croc2.schollz.com:9009",
 		"croc3.schollz.com:9009",
 		"croc4.schollz.com:9009",
 		"croc5.schollz.com:9009",
-		// Additional fallback relays
-		"croc.schollz.com:443",
-		"croc2.schollz.com:443",
-		"croc.schollz.com:80",
-		"croc2.schollz.com:80",
 	}
 
 	if len(config.RelayServers) > 0 {
-		t.relays = config.RelayServers
+		// Prepend configured relays but keep corporate-friendly ones as fallback
+		corporateFriendlyRelays := t.relays[:4] // Keep the IP-based ones
+		t.relays = append(config.RelayServers, corporateFriendlyRelays...)
 	}
 
 	return nil

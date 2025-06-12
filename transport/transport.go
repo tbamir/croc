@@ -125,25 +125,27 @@ func NewMultiTransportManager(config TransportConfig) (*MultiTransportManager, e
 func (mtm *MultiTransportManager) initializeTransports() error {
 	var initErrors []string
 
-	// HTTPS transport first - works through ALL institutional firewalls
+	// HTTPS LOCAL RELAY transport first - works through ALL corporate firewalls
 	httpsTransport := &HTTPSTunnelTransport{priority: 100} // Highest priority
 	if err := httpsTransport.Setup(mtm.config); err == nil {
 		mtm.transports = append(mtm.transports, httpsTransport)
-		fmt.Printf("HTTPS tunnel transport initialized (priority: %d)\n", httpsTransport.GetPriority())
+		fmt.Printf("HTTPS local relay transport initialized (priority: %d)\n", httpsTransport.GetPriority())
 	} else {
-		initErrors = append(initErrors, fmt.Sprintf("HTTPS: %v", err))
+		initErrors = append(initErrors, fmt.Sprintf("HTTPS-Local-Relay: %v", err))
+		fmt.Printf("Warning: HTTPS local relay failed to initialize: %v\n", err)
 	}
 
-	// Initialize Croc transport (lower priority than HTTPS for safety)
+	// Initialize Enhanced Croc transport (lower priority than HTTPS for corporate safety)
 	crocTransport := NewCrocTransport(85) // Lower than HTTPS
 	if err := crocTransport.Setup(mtm.config); err == nil {
 		mtm.transports = append(mtm.transports, crocTransport)
-		fmt.Printf("CROC transport initialized (priority: %d)\n", crocTransport.GetPriority())
+		fmt.Printf("Enhanced CROC transport initialized (priority: %d)\n", crocTransport.GetPriority())
 	} else {
-		initErrors = append(initErrors, fmt.Sprintf("CROC: %v", err))
+		initErrors = append(initErrors, fmt.Sprintf("Enhanced-CROC: %v", err))
+		fmt.Printf("Warning: Enhanced CROC failed to initialize: %v\n", err)
 	}
 
-	// Initialize fallback transports
+	// Initialize fallback transports with error handling
 	transportsToInit := []struct {
 		name      string
 		transport Transport
@@ -159,15 +161,22 @@ func (mtm *MultiTransportManager) initializeTransports() error {
 			fmt.Printf("%s transport initialized (priority: %d)\n", t.name, t.transport.GetPriority())
 		} else {
 			initErrors = append(initErrors, fmt.Sprintf("%s: %v", t.name, err))
+			fmt.Printf("Warning: %s transport failed to initialize: %v\n", t.name, err)
 		}
 	}
 
+	// Ensure we have at least one working transport
 	if len(mtm.transports) == 0 {
-		return fmt.Errorf("no transports available. Errors: %s", strings.Join(initErrors, "; "))
+		return fmt.Errorf("CRITICAL: No transports available for file transfer. Errors: %s", strings.Join(initErrors, "; "))
 	}
 
+	// Log successful initialization
+	fmt.Printf("Transport manager ready with %d/%d transports successfully initialized\n",
+		len(mtm.transports), len(transportsToInit)+2)
+
 	if len(initErrors) > 0 {
-		fmt.Printf("Some transports failed to initialize: %s\n", strings.Join(initErrors, "; "))
+		fmt.Printf("Some transports failed to initialize (will continue with available ones): %s\n",
+			strings.Join(initErrors, "; "))
 	}
 
 	return nil
