@@ -71,16 +71,8 @@ func (t *TorTransport) Send(data []byte, metadata TransferMetadata) error {
 	}
 	defer t.cleanupHiddenService(hiddenService)
 
-	// Start HTTP server on hidden service
-	_ = &http.Server{
-		Addr:         ":8080",
-		Handler:      t.createFileHandler(data, metadata),
-		ReadTimeout:  10 * time.Minute,
-		WriteTimeout: 10 * time.Minute,
-	}
-
-	// Server would run and provide the file
-	// This is a simplified implementation
+	// Server would run and provide the file through hidden service
+	// This is a simplified implementation placeholder
 	return fmt.Errorf("tor send not fully implemented yet")
 }
 
@@ -104,7 +96,7 @@ func (t *TorTransport) Receive(metadata TransferMetadata) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Tor download failed with status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("tor download failed with status: %d", resp.StatusCode)
 	}
 
 	// Read response data
@@ -245,8 +237,9 @@ func (t *TorTransport) createFileHandler(data []byte, metadata TransferMetadata)
 	})
 }
 
-func (t *TorTransport) extractHiddenServiceURL(transferID string) string {
+func (t *TorTransport) extractHiddenServiceURL(_ string) string {
 	// Extract hidden service URL from transfer ID
 	// This would parse the transfer ID to get the .onion address
+	// Currently a placeholder implementation
 	return ""
 }

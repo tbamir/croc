@@ -509,7 +509,7 @@ func (mtm *MultiTransportManager) testDPIDetection() bool {
 }
 
 // testPortConnectivity tests connectivity to various ports
-func (mtm *MultiTransportManager) testPortConnectivity(profile *NetworkProfile, ctx context.Context) {
+func (mtm *MultiTransportManager) testPortConnectivity(profile *NetworkProfile, _ context.Context) {
 	standardPorts := []int{21, 22, 23, 25, 53, 80, 110, 143, 443, 993, 995}
 	p2pPorts := []int{1080, 6881, 6969, 8080, 9009, 9010}
 
@@ -546,7 +546,7 @@ func (mtm *MultiTransportManager) testSinglePortConnectivity(port int, timeout t
 	testHosts := []string{"8.8.8.8", "1.1.1.1", "google.com"}
 
 	for _, host := range testHosts {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), timeout)
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprintf("%d", port)), timeout)
 		if err == nil {
 			conn.Close()
 			return true
@@ -556,7 +556,7 @@ func (mtm *MultiTransportManager) testSinglePortConnectivity(port int, timeout t
 }
 
 // testDNSFiltering tests for DNS filtering
-func (mtm *MultiTransportManager) testDNSFiltering(profile *NetworkProfile, ctx context.Context) {
+func (mtm *MultiTransportManager) testDNSFiltering(profile *NetworkProfile, _ context.Context) {
 	// Test resolution of various domain types
 	testDomains := []string{
 		"google.com",       // Should always work
@@ -586,7 +586,7 @@ func (mtm *MultiTransportManager) testDNSResolution(domain string) bool {
 }
 
 // testP2PCapability tests UDP hole punching and P2P capability
-func (mtm *MultiTransportManager) testP2PCapability(profile *NetworkProfile, ctx context.Context) {
+func (mtm *MultiTransportManager) testP2PCapability(profile *NetworkProfile, _ context.Context) {
 	// Test UDP connectivity
 	conn, err := net.DialTimeout("udp", "8.8.8.8:53", 5*time.Second)
 	if err != nil {
