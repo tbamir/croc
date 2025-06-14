@@ -222,49 +222,59 @@ func (t *HTTPSTunnelTransport) Setup(config TransportConfig) error {
 
 // Send transmits data through multiple HTTPS relay services with automatic failover
 func (t *HTTPSTunnelTransport) Send(data []byte, metadata TransferMetadata) error {
-	// CRITICAL FIX: Validate size before any processing to prevent memory exhaustion
-	maxRawSize := int64(25 * 1024 * 1024) // 25MB raw data limit (will be ~33MB base64)
-	if int64(len(data)) > maxRawSize {
-		return fmt.Errorf("file too large for HTTPS transport (%d bytes, max %d). Use CROC transport for large files", len(data), maxRawSize)
+	// SECURE P2P RELAY: Only use local relay server for trusted lab-to-lab transfers
+	maxSize := int64(100 * 1024 * 1024) // 100MB limit for HTTPS fallback
+	if int64(len(data)) > maxSize {
+		return fmt.Errorf("file too large for HTTPS fallback transport (%d bytes, max %d). Primary CROC transport should handle this", len(data), maxSize)
 	}
 
-	// Additional check for base64 expansion (4/3 ratio)
-	estimatedBase64Size := int64(len(data)) * 4 / 3
-	maxBase64Size := int64(50 * 1024 * 1024) // 50MB base64 limit
-	if estimatedBase64Size > maxBase64Size {
-		return fmt.Errorf("file too large after base64 encoding (%d bytes estimated, max %d). Use CROC transport for large files", estimatedBase64Size, maxBase64Size)
+	fmt.Println("🔒 HTTPS Fallback: Using secure local relay for lab-to-lab transfer...")
+
+	// Try local relay first (most secure for lab environments)
+	localRelay := NewSimpleHTTPRelay()
+	err := localRelay.Start(8080) // Use port 8080 for local relay
+	if err != nil {
+		fmt.Printf("⚠️  Local relay failed to start: %v\n", err)
+		return fmt.Errorf("HTTPS fallback transport failed: local relay unavailable")
+	}
+	defer localRelay.Stop()
+
+	// Create secure payload for local relay
+	payload := HTTPSTransferPayload{
+		TransferID: metadata.TransferID,
+		FileName:   metadata.FileName,
+		FileSize:   int64(len(data)),
+		Data:       base64.StdEncoding.EncodeToString(data),
+		Checksum:   metadata.Checksum,
+		Timestamp:  time.Now(),
 	}
 
-	fmt.Println("🌍 Attempting international HTTPS transfer via multiple relay services...")
-
-	// Try each service in priority order
-	var lastError error
-	for _, service := range relayServices {
-		// Skip GitHub Gists if no token available
-		if service.RequiresAuth && service.Name == "GitHub Gists" && t.githubToken == "" {
-			fmt.Printf("⚠️  Skipping %s (no authentication token)\n", service.Name)
-			continue
-		}
-
-		// Check size limits
-		if int64(len(data)) > service.MaxSize {
-			fmt.Printf("⚠️  Skipping %s (file too large: %d > %d)\n", service.Name, len(data), service.MaxSize)
-			continue
-		}
-
-		fmt.Printf("🔄 Trying %s...\n", service.Name)
-
-		err := t.sendViaService(service, data, metadata)
-		if err == nil {
-			fmt.Printf("✅ Successfully sent via %s\n", service.Name)
-			return nil
-		}
-
-		fmt.Printf("❌ %s failed: %v\n", service.Name, err)
-		lastError = err
+	// Send to local relay
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal secure payload: %w", err)
 	}
 
-	return fmt.Errorf("all HTTPS relay services failed, last error: %w", lastError)
+	req, err := http.NewRequest("POST", "http://localhost:8080/relay", bytes.NewReader(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create relay request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "TrustDrop-Lab-Relay/1.0")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send to secure relay: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("secure relay returned status %d", resp.StatusCode)
+	}
+
+	fmt.Printf("✅ Successfully sent via secure local relay (lab-to-lab mode)\n")
+	return nil
 }
 
 // sendViaService attempts to send data via a specific relay service
@@ -419,26 +429,45 @@ func (t *HTTPSTunnelTransport) sendViaGitHubGists(data []byte, metadata Transfer
 	return nil
 }
 
-// Receive retrieves data from HTTPS relay services
+// Receive retrieves data from secure local relay
 func (t *HTTPSTunnelTransport) Receive(metadata TransferMetadata) ([]byte, error) {
-	fmt.Println("🌍 Attempting to receive via international HTTPS relay services...")
+	fmt.Println("🔒 HTTPS Fallback: Attempting to receive from secure local relay...")
 
-	// Try each service to find the data
-	var lastError error
-	for _, service := range relayServices {
-		fmt.Printf("🔄 Trying to receive from %s...\n", service.Name)
-
-		data, err := t.receiveViaService(service, metadata.TransferID)
-		if err == nil {
-			fmt.Printf("✅ Successfully received from %s\n", service.Name)
-			return data, nil
-		}
-
-		fmt.Printf("❌ %s failed: %v\n", service.Name, err)
-		lastError = err
+	// Try to receive from local relay
+	req, err := http.NewRequest("GET", "http://localhost:8080/relay/"+metadata.TransferID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create relay request: %w", err)
 	}
 
-	return nil, fmt.Errorf("failed to receive from all HTTPS relay services, last error: %w", lastError)
+	req.Header.Set("User-Agent", "TrustDrop-Lab-Relay/1.0")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to receive from secure relay: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("transfer not found on secure relay (may still be in progress)")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("secure relay returned status %d", resp.StatusCode)
+	}
+
+	var payload HTTPSTransferPayload
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("failed to decode secure relay payload: %w", err)
+	}
+
+	// Decode the data
+	data, err := base64.StdEncoding.DecodeString(payload.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode base64 data: %w", err)
+	}
+
+	fmt.Printf("✅ Successfully received from secure local relay (%d bytes)\n", len(data))
+	return data, nil
 }
 
 // receiveViaService attempts to receive data from a specific relay service

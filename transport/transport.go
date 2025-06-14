@@ -125,16 +125,15 @@ func NewMultiTransportManager(config TransportConfig) (*MultiTransportManager, e
 func (mtm *MultiTransportManager) initializeTransports() error {
 	var initErrors []string
 
-	// DISABLE HTTPS transport - not suitable for secure P2P automation
-	// httpsTransport := NewHTTPSTunnelTransport(95)
-	// if err := httpsTransport.Setup(mtm.config); err == nil {
-	//     mtm.transports = append(mtm.transports, httpsTransport)
-	//     fmt.Printf("HTTPS International transport initialized as PRIMARY (priority: %d)\n", httpsTransport.GetPriority())
-	// } else {
-	//     initErrors = append(initErrors, fmt.Sprintf("HTTPS-International: %v", err))
-	//     fmt.Printf("Warning: HTTPS International failed to initialize: %v\n", err)
-	// }
-	fmt.Printf("HTTPS transport disabled - focusing on secure P2P methods\n")
+	// HTTPS INTERNATIONAL TRANSPORT - FALLBACK for extreme firewall cases
+	httpsTransport := NewHTTPSTunnelTransport(45) // Lower priority as fallback only
+	if err := httpsTransport.Setup(mtm.config); err == nil {
+		mtm.transports = append(mtm.transports, httpsTransport)
+		fmt.Printf("HTTPS International transport initialized as FALLBACK (priority: %d)\n", httpsTransport.GetPriority())
+	} else {
+		initErrors = append(initErrors, fmt.Sprintf("HTTPS-International: %v", err))
+		fmt.Printf("Warning: HTTPS International failed to initialize: %v\n", err)
+	}
 
 	// DISABLE WebSocket transport - echo services don't support file storage
 	// websocketTransport := NewWebSocketTransport(70)
@@ -183,10 +182,11 @@ func (mtm *MultiTransportManager) initializeTransports() error {
 	}
 
 	// Provide network guidance for Europe-to-US transfers
-	fmt.Printf("\n🌍 EUROPE-TO-US TRANSFER CONFIGURATION:\n")
+	fmt.Printf("\n🌍 LAB-TO-LAB TRANSFER CONFIGURATION:\n")
 	fmt.Printf("   Priority 1 (60): CROC - P2P with international relay servers\n")
-	fmt.Printf("   Priority 2 (50): Tor - Maximum privacy (if installed)\n")
-	fmt.Printf("   🔥 FIREWALL TRAVERSAL: CROC optimized for corporate/university networks\n")
+	fmt.Printf("   Priority 2 (45): HTTPS - Secure local relay fallback\n")
+	fmt.Printf("   Priority 3 (50): Tor - Maximum privacy (if installed)\n")
+	fmt.Printf("   🔥 FIREWALL TRAVERSAL: Multiple methods for maximum reliability\n")
 	fmt.Printf("   🔒 SECURITY: End-to-end encryption with blockchain audit trail\n\n")
 
 	return nil
@@ -752,14 +752,14 @@ func (mtm *MultiTransportManager) SendWithFailover(data []byte, metadata Transfe
 	defer mtm.mutex.Unlock()
 
 	// Wait for network analysis with timeout
-	analysisTimeout := time.After(15 * time.Second)
+	analysisTimeout := time.After(10 * time.Second)
 	analysisTicker := time.NewTicker(200 * time.Millisecond)
 	defer analysisTicker.Stop()
 
 	for !mtm.analysisComplete {
 		select {
 		case <-analysisTimeout:
-			fmt.Printf("Network analysis timeout, proceeding with HTTPS-first strategy\n")
+			fmt.Printf("Network analysis timeout, proceeding with CROC-first strategy\n")
 			goto proceed
 		case <-analysisTicker.C:
 			continue
