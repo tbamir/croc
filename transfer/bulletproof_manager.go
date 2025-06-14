@@ -413,28 +413,28 @@ func (btm *BulletproofTransferManager) provideNetworkGuidance() {
 	if btm.networkProfile.IsRestrictive {
 		switch btm.networkProfile.NetworkType {
 		case "corporate":
-			btm.updateStatus("Corporate network detected - using enterprise-friendly transfer methods")
+			btm.updateStatus("Corporate network detected - using CROC P2P protocol with enterprise-friendly relay servers")
 		case "university":
-			btm.updateStatus("University network detected - using education-network-compatible methods")
+			btm.updateStatus("University network detected - using lab-optimized CROC protocol")
 		case "institutional":
-			btm.updateStatus("Institutional network detected - using maximum compatibility mode")
+			btm.updateStatus("Institutional network detected - using maximum compatibility CROC configuration")
 		default:
 			btm.updateStatus("Restrictive network detected - optimizing for institutional compatibility")
 		}
 	} else {
-		btm.updateStatus("Open network detected - using optimized transfer methods")
+		btm.updateStatus("Open network detected - using optimized CROC P2P protocol")
 	}
 }
 
 // provideConnectionGuidance provides connection-specific guidance
 func (btm *BulletproofTransferManager) provideConnectionGuidance() {
 	if btm.networkProfile.IsRestrictive {
-		btm.updateStatus("Institutional network - connecting via web-compatible protocols...")
+		btm.updateStatus("Lab network detected - establishing CROC relay connection via HTTPS/HTTP ports...")
 		if len(btm.networkRestrictions) > 0 {
-			btm.updateStatus("Note: Network restrictions detected, using maximum compatibility mode")
+			btm.updateStatus("Network restrictions detected - using firewall-compatible protocols")
 		}
 	} else {
-		btm.updateStatus("Connecting via available transport methods...")
+		btm.updateStatus("Connecting via secure CROC P2P relay servers...")
 	}
 }
 
@@ -454,7 +454,7 @@ func (btm *BulletproofTransferManager) receiveWithInstitutionalNetworkSupport(me
 			if btm.networkProfile.IsRestrictive {
 				btm.updateStatus(fmt.Sprintf("Connection attempt %d/%d (institutional network may require additional time)...",
 					attempt, maxAttempts))
-	} else {
+			} else {
 				btm.updateStatus(fmt.Sprintf("Connection attempt %d/%d...", attempt, maxAttempts))
 			}
 		}
@@ -691,22 +691,22 @@ func (btm *BulletproofTransferManager) adaptSettingsToNetwork() {
 
 	if profile.IsRestrictive {
 		// Restrictive network - be more conservative and patient
-		btm.adaptiveSettings.TimeoutMultiplier = 3.0
-		btm.adaptiveSettings.ChunkSizeBytes = 4 * 1024 * 1024 // 4MB chunks for institutional networks
+		btm.adaptiveSettings.TimeoutMultiplier = 3.5          // Longer timeouts for labs
+		btm.adaptiveSettings.ChunkSizeBytes = 8 * 1024 * 1024 // 8MB chunks for stability
 		btm.adaptiveSettings.MaxConcurrentFiles = 1
-		btm.adaptiveSettings.PreferredTransport = "https-tunnel"
-		btm.adaptiveSettings.RetryStrategy.MaxAttempts = 15 // More retries
-		btm.adaptiveSettings.RetryStrategy.InitialDelay = 7 * time.Second
-		btm.adaptiveSettings.RetryStrategy.MaxDelay = 90 * time.Second
+		btm.adaptiveSettings.PreferredTransport = "simple-croc" // CROC is primary
+		btm.adaptiveSettings.RetryStrategy.MaxAttempts = 20     // More retries for labs
+		btm.adaptiveSettings.RetryStrategy.InitialDelay = 10 * time.Second
+		btm.adaptiveSettings.RetryStrategy.MaxDelay = 120 * time.Second
 	} else {
 		// Open network - more aggressive but still reliable
-		btm.adaptiveSettings.TimeoutMultiplier = 1.5
+		btm.adaptiveSettings.TimeoutMultiplier = 2.0
 		btm.adaptiveSettings.ChunkSizeBytes = 16 * 1024 * 1024 // 16MB chunks
-		btm.adaptiveSettings.MaxConcurrentFiles = 3
-		btm.adaptiveSettings.PreferredTransport = "https-tunnel" // Still prefer HTTPS for reliability
-		btm.adaptiveSettings.RetryStrategy.MaxAttempts = 10
-		btm.adaptiveSettings.RetryStrategy.InitialDelay = 3 * time.Second
-		btm.adaptiveSettings.RetryStrategy.MaxDelay = 45 * time.Second
+		btm.adaptiveSettings.MaxConcurrentFiles = 2
+		btm.adaptiveSettings.PreferredTransport = "simple-croc" // CROC is primary
+		btm.adaptiveSettings.RetryStrategy.MaxAttempts = 15
+		btm.adaptiveSettings.RetryStrategy.InitialDelay = 5 * time.Second
+		btm.adaptiveSettings.RetryStrategy.MaxDelay = 60 * time.Second
 	}
 
 	fmt.Printf("Adapted settings for %s network (restrictive: %t, preferred: %s)\n",
@@ -770,41 +770,41 @@ func (btm *BulletproofTransferManager) processReceivedDataWithMetadata(encrypted
 		return btm.processFileManifestWithProgress(manifest, receivedDir, transferCode)
 	}
 
-		// Try to parse as single file payload with embedded filename
-		var filePayload struct {
-			OriginalName string `json:"original_name"`
-			Data         []byte `json:"data"`
-		}
+	// Try to parse as single file payload with embedded filename
+	var filePayload struct {
+		OriginalName string `json:"original_name"`
+		Data         []byte `json:"data"`
+	}
 
-		if err := json.Unmarshal(decryptedData, &filePayload); err == nil && filePayload.OriginalName != "" {
+	if err := json.Unmarshal(decryptedData, &filePayload); err == nil && filePayload.OriginalName != "" {
 		// Single file with embedded filename
 		filename := btm.sanitizeFilename(filePayload.OriginalName)
-			filePath := filepath.Join(receivedDir, filename)
+		filePath := filepath.Join(receivedDir, filename)
 
-			if err := os.WriteFile(filePath, filePayload.Data, 0644); err != nil {
-				return nil, 0, fmt.Errorf("failed to write received file: %w", err)
-			}
+		if err := os.WriteFile(filePath, filePayload.Data, 0644); err != nil {
+			return nil, 0, fmt.Errorf("failed to write received file: %w", err)
+		}
 
 		btm.updateStatus(fmt.Sprintf("Received file: %s", filename))
-			return []string{filePath}, int64(len(filePayload.Data)), nil
+		return []string{filePath}, int64(len(filePayload.Data)), nil
 	}
 
 	// Raw file data (legacy format)
 	filename := fmt.Sprintf("received_file_%d", time.Now().Unix())
-			if metadata != nil && metadata.FileName != "" {
+	if metadata != nil && metadata.FileName != "" {
 		filename = btm.sanitizeFilename(metadata.FileName)
-			} else if btm.transferID != "" {
-				filename = fmt.Sprintf("file_%s", btm.transferID)
-			}
+	} else if btm.transferID != "" {
+		filename = fmt.Sprintf("file_%s", btm.transferID)
+	}
 
-			filePath := filepath.Join(receivedDir, filename)
-			if err := os.WriteFile(filePath, decryptedData, 0644); err != nil {
-				return nil, 0, fmt.Errorf("failed to write received file: %w", err)
-			}
+	filePath := filepath.Join(receivedDir, filename)
+	if err := os.WriteFile(filePath, decryptedData, 0644); err != nil {
+		return nil, 0, fmt.Errorf("failed to write received file: %w", err)
+	}
 
 	btm.updateStatus(fmt.Sprintf("Received file: %s", filename))
-			return []string{filePath}, int64(len(decryptedData)), nil
-		}
+	return []string{filePath}, int64(len(decryptedData)), nil
+}
 
 // sanitizeFilename ensures filenames are safe for the filesystem
 func (btm *BulletproofTransferManager) sanitizeFilename(filename string) string {
@@ -1186,8 +1186,8 @@ func (btm *BulletproofTransferManager) Close() error {
 	var errors []error
 
 	if btm.transportManager != nil {
-	if err := btm.transportManager.Close(); err != nil {
-		errors = append(errors, err)
+		if err := btm.transportManager.Close(); err != nil {
+			errors = append(errors, err)
 		}
 	}
 

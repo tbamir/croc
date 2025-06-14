@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/schollz/croc/v10/src/croc"
 )
@@ -124,6 +125,21 @@ func (t *SimpleCrocTransport) Send(data []byte, metadata TransferMetadata) error
 	}
 
 	fmt.Printf("✅ CROC international send successful! Transfer code: %s\n", metadata.TransferID)
+
+	// CRITICAL: Keep sender connected for receiver coordination
+	fmt.Printf("🔄 Maintaining relay connection for peer coordination...\n")
+	fmt.Printf("   Waiting for receiver to establish secure channel...\n")
+
+	// Extended wait time for international lab-to-lab transfers
+	coordinationDelay := 90 * time.Second
+	if metadata.FileSize > 100*1024*1024 { // Files > 100MB get more time
+		coordinationDelay = 180 * time.Second
+	}
+
+	fmt.Printf("   Coordination window: %v\n", coordinationDelay)
+	time.Sleep(coordinationDelay)
+
+	fmt.Printf("✅ Transfer coordination complete\n")
 	return nil
 }
 

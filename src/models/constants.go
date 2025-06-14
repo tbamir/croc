@@ -49,7 +49,7 @@ func init() {
 	doRemember := false
 
 	// CORPORATE NETWORK MODE: Always use local DNS, never external
-	INTERNAL_DNS = false // Use local DNS only
+	INTERNAL_DNS = true // Use local DNS only for corporate networks
 
 	for _, flag := range os.Args {
 		if flag == "--internal-dns" {
@@ -76,10 +76,10 @@ func init() {
 	}
 	log.Trace("Using internal DNS: ", INTERNAL_DNS)
 
-	// Use direct IP addresses for corporate network compatibility
-	// These IPs are for croc.schollz.com and croc2.schollz.com
-	DEFAULT_RELAY = "165.232.162.250:9009"  // Direct IP, no DNS needed
-	DEFAULT_RELAY6 = "165.232.162.250:9009" // Same for IPv6
+	// Use HTTPS-compatible ports for corporate network compatibility
+	// These provide better firewall traversal than direct IP addresses
+	DEFAULT_RELAY = "croc.schollz.com:443"   // Use HTTPS port for firewall compatibility
+	DEFAULT_RELAY6 = "croc6.schollz.com:443" // Use HTTPS port for firewall compatibility
 
 	log.Tracef("Default relay (corporate mode): %s", DEFAULT_RELAY)
 	log.Tracef("Default relay6 (corporate mode): %s", DEFAULT_RELAY6)

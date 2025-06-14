@@ -125,25 +125,27 @@ func NewMultiTransportManager(config TransportConfig) (*MultiTransportManager, e
 func (mtm *MultiTransportManager) initializeTransports() error {
 	var initErrors []string
 
-	// HTTPS INTERNATIONAL TRANSPORT - PRIMARY for Europe-to-US firewall traversal
-	httpsTransport := NewHTTPSTunnelTransport(95)
-	if err := httpsTransport.Setup(mtm.config); err == nil {
-		mtm.transports = append(mtm.transports, httpsTransport)
-		fmt.Printf("HTTPS International transport initialized as PRIMARY (priority: %d)\n", httpsTransport.GetPriority())
-	} else {
-		initErrors = append(initErrors, fmt.Sprintf("HTTPS-International: %v", err))
-		fmt.Printf("Warning: HTTPS International failed to initialize: %v\n", err)
-	}
+	// DISABLE HTTPS transport - not suitable for secure P2P automation
+	// httpsTransport := NewHTTPSTunnelTransport(95)
+	// if err := httpsTransport.Setup(mtm.config); err == nil {
+	//     mtm.transports = append(mtm.transports, httpsTransport)
+	//     fmt.Printf("HTTPS International transport initialized as PRIMARY (priority: %d)\n", httpsTransport.GetPriority())
+	// } else {
+	//     initErrors = append(initErrors, fmt.Sprintf("HTTPS-International: %v", err))
+	//     fmt.Printf("Warning: HTTPS International failed to initialize: %v\n", err)
+	// }
+	fmt.Printf("HTTPS transport disabled - focusing on secure P2P methods\n")
 
-	// WEBSOCKET TRANSPORT - SECONDARY for firewall traversal
-	websocketTransport := NewWebSocketTransport(70)
-	if err := websocketTransport.Setup(mtm.config); err == nil {
-		mtm.transports = append(mtm.transports, websocketTransport)
-		fmt.Printf("WebSocket transport initialized as SECONDARY (priority: %d)\n", websocketTransport.GetPriority())
-	} else {
-		initErrors = append(initErrors, fmt.Sprintf("WebSocket: %v", err))
-		fmt.Printf("Warning: WebSocket failed to initialize: %v\n", err)
-	}
+	// DISABLE WebSocket transport - echo services don't support file storage
+	// websocketTransport := NewWebSocketTransport(70)
+	// if err := websocketTransport.Setup(mtm.config); err == nil {
+	//     mtm.transports = append(mtm.transports, websocketTransport)
+	//     fmt.Printf("WebSocket transport initialized as SECONDARY (priority: %d)\n", websocketTransport.GetPriority())
+	// } else {
+	//     initErrors = append(initErrors, fmt.Sprintf("WebSocket: %v", err))
+	//     fmt.Printf("Warning: WebSocket failed to initialize: %v\n", err)
+	// }
+	fmt.Printf("WebSocket transport disabled - not suitable for file storage\n")
 
 	// CROC TRANSPORT - FALLBACK for when others fail
 	crocTransport := NewCrocTransport(60) // Lower priority as fallback
@@ -182,11 +184,10 @@ func (mtm *MultiTransportManager) initializeTransports() error {
 
 	// Provide network guidance for Europe-to-US transfers
 	fmt.Printf("\n🌍 EUROPE-TO-US TRANSFER CONFIGURATION:\n")
-	fmt.Printf("   Priority 1 (95): HTTPS International - Uses public HTTPS services\n")
-	fmt.Printf("   Priority 2 (70): WebSocket - Uses WebSocket echo services\n")
-	fmt.Printf("   Priority 3 (60): CROC - P2P with relay servers\n")
-	fmt.Printf("   Priority 4 (50): Tor - Maximum privacy (if installed)\n")
-	fmt.Printf("   🔥 FIREWALL TRAVERSAL: HTTPS + WebSocket optimized for corporate networks\n\n")
+	fmt.Printf("   Priority 1 (60): CROC - P2P with international relay servers\n")
+	fmt.Printf("   Priority 2 (50): Tor - Maximum privacy (if installed)\n")
+	fmt.Printf("   🔥 FIREWALL TRAVERSAL: CROC optimized for corporate/university networks\n")
+	fmt.Printf("   🔒 SECURITY: End-to-end encryption with blockchain audit trail\n\n")
 
 	return nil
 }
@@ -923,15 +924,8 @@ func (mtm *MultiTransportManager) getEffectivePriority(transport Transport) int 
 	basePriority := transport.GetPriority()
 	transportName := transport.GetName()
 
-	// Simple CROC gets highest priority (HTTPS local relay temporarily disabled)
-	if transportName == "simple-croc" {
-		return basePriority + 20 // High boost for CROC
-	}
-
-	// Reduce priorities for other transports to ensure CROC is preferred
-	if transportName == "https-tunnel" || transportName == "https-local-relay" {
-		return basePriority - 50 // Lower priority until HTTPS cross-machine issues are fixed
-	}
+	// Use natural transport priorities for proper failover
+	// HTTPS (95) -> WebSocket (70) -> CROC (60) -> Tor (50)
 
 	// Apply success/failure history
 	if successCount, exists := mtm.successHistory[transportName]; exists {

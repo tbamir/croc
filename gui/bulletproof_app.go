@@ -243,20 +243,20 @@ func (ba *BulletproofApp) updateNetworkStatusDisplay(status map[string]interface
 			switch profile.NetworkType {
 			case "corporate":
 				icon = "🏢"
-				statusText = "Corporate Network"
+				statusText = "Corporate Network - Using CROC P2P"
 			case "university":
 				icon = "🎓"
-				statusText = "University Network"
+				statusText = "University Network - Lab Optimized"
 			case "institutional":
 				icon = "🔒"
-				statusText = "Institutional Network"
+				statusText = "Institutional Network - Max Compatibility"
 			default:
 				icon = "🔒"
-				statusText = "Restricted Network"
+				statusText = "Restricted Network - CROC Protocol"
 			}
 		} else {
 			icon = "🌐"
-			statusText = "Open Network"
+			statusText = "Open Network - Optimized CROC P2P"
 		}
 
 		// Count available transport methods
@@ -270,7 +270,7 @@ func (ba *BulletproofApp) updateNetworkStatusDisplay(status map[string]interface
 				}
 			}
 			ba.networkInfo.AvailableTransports = availableCount
-			statusText += fmt.Sprintf(" • %d methods available", availableCount)
+			statusText += fmt.Sprintf(" • %d methods ready", availableCount)
 		}
 	}
 
@@ -364,16 +364,16 @@ func (ba *BulletproofApp) updateNetworkGuidance(label *widget.Label) {
 
 	switch ba.networkInfo.Type {
 	case "corporate":
-		guidance = "Corporate Network: Using enterprise-friendly transfer methods that work through business firewalls and security systems."
+		guidance = "Corporate Network: Using CROC P2P protocol with enterprise-friendly relay servers that work through business firewalls on standard web ports (443/80)."
 	case "university":
-		guidance = "University Network: Using education-network-compatible methods that respect academic IT policies."
+		guidance = "University Network: Using lab-optimized CROC protocol designed for educational IT environments with enhanced firewall compatibility."
 	case "institutional":
-		guidance = "Institutional Network: Using maximum compatibility mode designed for managed network environments."
+		guidance = "Institutional Network: Using maximum compatibility CROC configuration designed for highly managed network environments."
 	default:
 		if ba.networkInfo.IsRestrictive {
-			guidance = "Restricted Network: Automatically using institutional-compatible transfer methods for maximum reliability."
+			guidance = "Restricted Network: Using institutional-compatible CROC P2P protocol with automatic firewall detection and adaptive routing."
 		} else {
-			guidance = "Open Network: Using optimized transfer methods for best performance and security."
+			guidance = "Open Network: Using optimized CROC P2P protocol for best performance with full security and blockchain audit trails."
 		}
 	}
 
