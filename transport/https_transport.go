@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -57,22 +60,63 @@ func (t *DirectHTTPSTransport) startP2PServer(transferID string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/transfer/"+transferID, t.handleDirectTransfer)
 
+	// Generate self-signed certificate for local use
+	cert, key, err := t.generateSelfSignedCert()
+	if err != nil {
+		fmt.Printf("❌ Failed to generate certificate: %v\n", err)
+		// Fall back to HTTP for local testing
+		return t.startHTTPServer(transferID, mux)
+	}
+
 	// Use TLS for security
 	t.server = &http.Server{
-		Addr:         ":8443", // Use HTTPS port
-		Handler:      mux,
-		TLSConfig:    &tls.Config{},
+		Addr:    ":8443", // Use HTTPS port
+		Handler: mux,
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{{Certificate: [][]byte{cert}, PrivateKey: key}},
+		},
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
 
-	// For production, use proper certificates
-	// For lab environment, self-signed is acceptable
-	fmt.Printf("✅ Direct P2P server ready on port 8443 for transfer %s\n", transferID)
+	// Start server in background
+	go func() {
+		fmt.Printf("🚀 Starting HTTPS server on port 8443 for transfer %s\n", transferID)
+		if err := t.server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+			fmt.Printf("❌ HTTPS server failed: %v\n", err)
+		}
+	}()
 
-	// In a full implementation, this would coordinate with the receiver
-	// for direct connection establishment
+	fmt.Printf("✅ Direct P2P HTTPS server ready on port 8443 for transfer %s\n", transferID)
 	return nil
+}
+
+// startHTTPServer starts an HTTP server as fallback
+func (t *DirectHTTPSTransport) startHTTPServer(transferID string, mux *http.ServeMux) error {
+	t.server = &http.Server{
+		Addr:         ":8080", // Use HTTP port as fallback
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+	}
+
+	// Start server in background
+	go func() {
+		fmt.Printf("🚀 Starting HTTP server on port 8080 for transfer %s\n", transferID)
+		if err := t.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Printf("❌ HTTP server failed: %v\n", err)
+		}
+	}()
+
+	fmt.Printf("✅ Direct P2P HTTP server ready on port 8080 for transfer %s\n", transferID)
+	return nil
+}
+
+// generateSelfSignedCert generates a self-signed certificate for local use
+func (t *DirectHTTPSTransport) generateSelfSignedCert() ([]byte, interface{}, error) {
+	// For now, return an error to fall back to HTTP
+	// In a full implementation, this would generate a proper self-signed cert
+	return nil, nil, fmt.Errorf("self-signed cert generation not implemented")
 }
 
 // handleDirectTransfer handles direct peer-to-peer transfer requests
@@ -100,15 +144,100 @@ func (t *DirectHTTPSTransport) handleDirectTransfer(w http.ResponseWriter, r *ht
 
 // Receive implements direct P2P HTTPS connection
 func (t *DirectHTTPSTransport) Receive(metadata TransferMetadata) ([]byte, error) {
-	fmt.Println("🔒 Direct HTTPS: Attempting direct peer connection...")
+	fmt.Println("🔒 Direct HTTPS: Attempting to receive from local network...")
 
-	// In a full P2P implementation, this would:
-	// 1. Discover peer through NAT traversal
-	// 2. Establish direct HTTPS connection
-	// 3. Download data directly from peer
+	// Try common local network addresses where the sender might be (both HTTPS and HTTP)
+	localAddresses := []string{
+		"localhost:8443",
+		"127.0.0.1:8443",
+		"localhost:8080",
+		"127.0.0.1:8080",
+	}
 
-	// For now, indicate that direct P2P connection is needed
-	return nil, fmt.Errorf("direct P2P HTTPS requires peer discovery implementation")
+	// Also try to discover local network IPs
+	if localIPs := t.getLocalNetworkIPs(); len(localIPs) > 0 {
+		for _, ip := range localIPs {
+			localAddresses = append(localAddresses, fmt.Sprintf("%s:8443", ip))
+			localAddresses = append(localAddresses, fmt.Sprintf("%s:8080", ip))
+		}
+	}
+
+	for _, addr := range localAddresses {
+		fmt.Printf("🔍 Trying to connect to: %s\n", addr)
+
+		// Create HTTP client with timeout
+		var client *http.Client
+		var url string
+
+		if strings.Contains(addr, ":8443") {
+			// HTTPS client
+			client = &http.Client{
+				Timeout: 10 * time.Second,
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // For self-signed certs
+				},
+			}
+			url = fmt.Sprintf("https://%s/transfer/%s", addr, metadata.TransferID)
+		} else {
+			// HTTP client
+			client = &http.Client{
+				Timeout: 10 * time.Second,
+			}
+			url = fmt.Sprintf("http://%s/transfer/%s", addr, metadata.TransferID)
+		}
+		resp, err := client.Get(url)
+		if err != nil {
+			fmt.Printf("❌ Failed to connect to %s: %v\n", addr, err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			data, err := io.ReadAll(resp.Body)
+			if err != nil {
+				fmt.Printf("❌ Failed to read data from %s: %v\n", addr, err)
+				continue
+			}
+
+			fmt.Printf("✅ Successfully received %d bytes from %s\n", len(data), addr)
+			return data, nil
+		}
+
+		fmt.Printf("❌ Server at %s returned status: %d\n", addr, resp.StatusCode)
+	}
+
+	return nil, fmt.Errorf("could not connect to any local HTTPS servers for transfer %s", metadata.TransferID)
+}
+
+// getLocalNetworkIPs returns local network IP addresses
+func (t *DirectHTTPSTransport) getLocalNetworkIPs() []string {
+	var ips []string
+
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ips
+	}
+
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+				if ipnet.IP.To4() != nil {
+					ips = append(ips, ipnet.IP.String())
+				}
+			}
+		}
+	}
+
+	return ips
 }
 
 // Rest of interface implementation

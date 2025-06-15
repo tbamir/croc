@@ -73,7 +73,7 @@ func (t *SimpleCrocTransport) Send(data []byte, metadata TransferMetadata) error
 	}
 	tempFile.Close()
 
-	// GLOBAL RELAY STRATEGY: Try regional relays based on network latency
+	// GLOBAL RELAY STRATEGY: Use only working relay servers
 	relayGroups := []struct {
 		name    string
 		servers []string
@@ -82,26 +82,9 @@ func (t *SimpleCrocTransport) Send(data []byte, metadata TransferMetadata) error
 		{
 			name: "Primary Global Relays",
 			servers: []string{
-				"croc.schollz.com",
-				"croc2.schollz.com",
+				"croc.schollz.com", // Only use the main working relay
 			},
-			timeout: 15 * time.Second,
-		},
-		{
-			name: "Backup Direct IP Relays",
-			servers: []string{
-				"165.232.162.250", // Direct IP fallback
-				"159.89.214.152",  // Secondary IP
-			},
-			timeout: 20 * time.Second,
-		},
-		{
-			name: "Alternative Relay Network",
-			servers: []string{
-				"croc3.schollz.com",
-				"relay.trustdrop.io", // Custom relay if available
-			},
-			timeout: 25 * time.Second,
+			timeout: 30 * time.Second, // Longer timeout for international
 		},
 	}
 
@@ -230,10 +213,7 @@ func (t *SimpleCrocTransport) Receive(metadata TransferMetadata) ([]byte, error)
 
 	// Try multiple relay servers for maximum firewall compatibility
 	relayServers := []string{
-		"croc.schollz.com",  // Primary relay server
-		"croc2.schollz.com", // Secondary relay server
-		"croc3.schollz.com", // Tertiary relay server
-		"165.232.162.250",   // Direct IP fallback (bypasses DNS blocks)
+		"croc.schollz.com", // Only use the main working relay server
 	}
 
 	var lastError error
