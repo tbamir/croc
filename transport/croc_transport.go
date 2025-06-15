@@ -11,55 +11,49 @@ import (
 	"github.com/schollz/croc/v10/src/croc"
 )
 
-// SimpleCrocTransport provides a straightforward wrapper around the CROC library
+// SimpleCrocTransport implements the Transport interface using the croc library
 type SimpleCrocTransport struct {
 	priority int
 	config   TransportConfig
 	options  croc.Options
 }
 
-// Setup initializes the CROC transport with international relay configuration
+// Setup configures the croc transport
 func (t *SimpleCrocTransport) Setup(config TransportConfig) error {
 	t.config = config
-	t.priority = 60
 
-	// GLOBAL RELAY STRATEGY: Regional relay servers for international transfers
+	// Configure for international lab-to-lab transfers with corporate firewall compatibility
 	t.options = croc.Options{
-		IsSender:         false, // Will be set dynamically
-		SharedSecret:     "",    // Will be set per transfer
-		Debug:            false,
-		RelayAddress:     "croc.schollz.com",                                            // Primary international relay
-		RelayAddress6:    "",                                                            // IPv6 disabled for corporate compatibility
-		RelayPorts:       []string{"443", "80", "8080", "8443", "9009", "9010", "9011"}, // Corporate-friendly ports FIRST
-		RelayPassword:    "",
-		Stdout:           false,
-		NoPrompt:         true,
-		NoMultiplexing:   false,
-		DisableLocal:     true, // Force relay usage for international transfers
-		OnlyLocal:        false,
-		IgnoreStdin:      true,
-		Ask:              false,
-		SendingText:      false,
-		NoCompress:       false, // Enable compression for international links
-		IP:               "",
-		Overwrite:        true,
-		Curve:            "p256", // More reliable than siec for international
-		HashAlgorithm:    "xxhash",
-		ThrottleUpload:   "",
-		ZipFolder:        false,
-		TestFlag:         false,
-		GitIgnore:        false,
-		MulticastAddress: "",
-		ShowQrCode:       false,
-		Exclude:          []string{},
+		RelayAddress:  "croc.schollz.com", // Only use the working relay server
+		RelayAddress6: "",                 // Disable IPv6 for corporate compatibility
+
+		// CORPORATE FIREWALL-COMPATIBLE port progression
+		RelayPorts: []string{
+			"443",                  // HTTPS - highest success rate in corporate networks
+			"80",                   // HTTP - second highest success rate
+			"8080",                 // Alternative HTTP - common corporate allowlist
+			"8443",                 // Alternative HTTPS - backup option
+			"9009", "9010", "9011", // CROC standard ports
+		},
+
+		RelayPassword:  "pass123",
+		NoPrompt:       true,
+		NoMultiplexing: false, // Allow multiplexing for better performance
+		DisableLocal:   true,  // FORCE relay usage for international transfers
+		Ask:            false,
+		Debug:          false,
+		Overwrite:      true,
+		Curve:          "p256",
+		HashAlgorithm:  "xxhash",
 	}
 
-	fmt.Println("International CROC transport setup completed")
+	fmt.Printf("International CROC transport setup completed\n")
 	return nil
 }
 
+// Send transmits data using the croc protocol with international relay optimization
 func (t *SimpleCrocTransport) Send(data []byte, metadata TransferMetadata) error {
-	// Create temporary file for the data
+	// Create temporary file for sending
 	tempFile, err := os.CreateTemp("", "croc_send_*.tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
@@ -67,76 +61,62 @@ func (t *SimpleCrocTransport) Send(data []byte, metadata TransferMetadata) error
 	defer os.Remove(tempFile.Name())
 	defer tempFile.Close()
 
+	// Check file size limit (100MB for production stability)
+	maxSize := int64(100 * 1024 * 1024) // 100MB limit
+	if int64(len(data)) > maxSize {
+		return fmt.Errorf("file too large for CROC transport (%d bytes, max %d)", len(data), maxSize)
+	}
+
 	// Write data to temp file
 	if _, err := tempFile.Write(data); err != nil {
-		return fmt.Errorf("failed to write to temp file: %w", err)
+		return fmt.Errorf("failed to write data to temp file: %w", err)
 	}
 	tempFile.Close()
 
-	// GLOBAL RELAY STRATEGY: Use only working relay servers
+	// Create coordination file to signal readiness
+	if err := t.createCoordinationFile(metadata.TransferID); err != nil {
+		fmt.Printf("Warning: Could not create CROC coordination file: %v\n", err)
+	}
+
+	// Configure CROC client for sending
+	t.options.IsSender = true
+	t.options.SharedSecret = metadata.TransferID
+
+	// International relay strategy with timeout management
 	relayGroups := []struct {
 		name    string
 		servers []string
 		timeout time.Duration
 	}{
 		{
-			name: "Primary Global Relays",
-			servers: []string{
-				"croc.schollz.com", // Only use the main working relay
-			},
-			timeout: 30 * time.Second, // Longer timeout for international
+			name:    "Primary Global Relays",
+			servers: []string{"croc.schollz.com"}, // Only use working relay
+			timeout: 30 * time.Second,             // Increased timeout for international
 		},
 	}
 
-	// Try each relay group with increasing timeouts
 	var lastError error
 	for groupIndex, group := range relayGroups {
 		fmt.Printf("🌍 Trying %s (Group %d/%d)\n", group.name, groupIndex+1, len(relayGroups))
 
-		for serverIndex, relayServer := range group.servers {
-			fmt.Printf("🔄 Attempting relay %d/%d: %s\n", serverIndex+1, len(group.servers), relayServer)
+		for relayIndex, relayServer := range group.servers {
+			fmt.Printf("🔄 Attempting relay %d/%d: %s\n", relayIndex+1, len(group.servers), relayServer)
 
-			options := croc.Options{
-				IsSender:     true,
-				SharedSecret: metadata.TransferID,
+			// Update relay configuration
+			t.options.RelayAddress = relayServer
 
-				// INTERNATIONAL OPTIMIZED CONFIGURATION
-				RelayAddress:  relayServer,
-				RelayAddress6: "", // IPv6 disabled for corporate compatibility
-
-				// CORPORATE FIREWALL-COMPATIBLE port progression with international focus
-				RelayPorts: []string{
-					"443",                  // HTTPS - best for international corporate networks
-					"80",                   // HTTP - second best internationally
-					"8080",                 // Alternative HTTP - common in Asia/Europe
-					"8443",                 // Alternative HTTPS - common in US corporate
-					"9009", "9010", "9011", // CROC standard ports
-				},
-
-				RelayPassword:  "pass123",
-				NoPrompt:       true,
-				NoMultiplexing: false, // Allow multiplexing for international bandwidth
-				DisableLocal:   true,  // FORCE relay usage for international transfers
-				Ask:            false,
-				Debug:          false,
-				Overwrite:      true,
-				Curve:          "p256", // More reliable than siec internationally
-				HashAlgorithm:  "xxhash",
-				NoCompress:     false, // Compression crucial for international links
-			}
-
-			// Create client with international timeout
+			// Create CROC client with timeout context
 			ctx, cancel := context.WithTimeout(context.Background(), group.timeout)
 			defer cancel()
 
-			client, err := croc.New(options)
+			client, err := croc.New(t.options)
 			if err != nil {
 				lastError = fmt.Errorf("failed to create CROC client for relay %s: %w", relayServer, err)
 				continue
 			}
 
 			// Test relay connectivity first
-			if !t.testRelayConnectivity(ctx, relayServer, options.RelayPorts[0]) {
+			if !t.testRelayConnectivity(ctx, relayServer, t.options.RelayPorts[0]) {
 				lastError = fmt.Errorf("relay %s connectivity test failed", relayServer)
 				continue
 			}
@@ -176,6 +156,25 @@ func (t *SimpleCrocTransport) Send(data []byte, metadata TransferMetadata) error
 	return fmt.Errorf("all international CROC relay strategies failed, last error: %w", lastError)
 }
 
+// createCoordinationFile creates a file to signal CROC sender readiness
+func (t *SimpleCrocTransport) createCoordinationFile(transferID string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	coordDir := filepath.Join(homeDir, ".trustdrop")
+	if err := os.MkdirAll(coordDir, 0755); err != nil {
+		return err
+	}
+
+	// Create CROC coordination info
+	coordInfo := fmt.Sprintf("croc_ready\ntransfer_id:%s\nrelay:croc.schollz.com\n", transferID)
+
+	coordFile := filepath.Join(coordDir, fmt.Sprintf("croc_%s.coord", transferID))
+	return os.WriteFile(coordFile, []byte(coordInfo), 0644)
+}
+
 // testRelayConnectivity tests if relay is reachable before attempting transfer
 func (t *SimpleCrocTransport) testRelayConnectivity(ctx context.Context, relayServer, port string) bool {
 	testTimeout := 5 * time.Second
@@ -193,6 +192,11 @@ func (t *SimpleCrocTransport) testRelayConnectivity(ctx context.Context, relaySe
 
 // Receive gets data using the croc protocol
 func (t *SimpleCrocTransport) Receive(metadata TransferMetadata) ([]byte, error) {
+	// Wait for sender coordination file (CROC sender ready signal)
+	if err := t.waitForSenderReady(metadata.TransferID, 45*time.Second); err != nil {
+		fmt.Printf("⏰ CROC sender not ready yet, proceeding anyway: %v\n", err)
+	}
+
 	// Create temporary directory for receiving
 	tempDir, err := os.MkdirTemp("", "croc_receive_")
 	if err != nil {
@@ -255,14 +259,27 @@ func (t *SimpleCrocTransport) Receive(metadata TransferMetadata) ([]byte, error)
 		}
 
 		fmt.Printf("📡 Connecting to lab relay server: %s...\n", relayServer)
-		err = client.Receive()
-		if err == nil {
-			fmt.Printf("✅ CROC lab receive successful from %s! Got file data\n", relayServer)
-			break
-		}
 
-		fmt.Printf("❌ Relay %s failed: %v\n", relayServer, err)
-		lastError = err
+		// Add timeout for receive operation
+		receiveErr := make(chan error, 1)
+		go func() {
+			receiveErr <- client.Receive()
+		}()
+
+		// Wait for receive with timeout
+		select {
+		case err = <-receiveErr:
+			if err == nil {
+				fmt.Printf("✅ CROC lab receive successful from %s! Got file data\n", relayServer)
+				break
+			}
+			fmt.Printf("❌ Relay %s failed: %v\n", relayServer, err)
+			lastError = err
+
+		case <-time.After(60 * time.Second): // Extended timeout for international
+			lastError = fmt.Errorf("timeout receiving from relay %s after 60s", relayServer)
+			fmt.Printf("❌ Relay %s timed out after 60s\n", relayServer)
+		}
 	}
 
 	if lastError != nil {
@@ -298,6 +315,27 @@ func (t *SimpleCrocTransport) Receive(metadata TransferMetadata) ([]byte, error)
 
 	fmt.Printf("✅ CROC international receive successful! Got %d bytes\n", len(data))
 	return data, nil
+}
+
+// waitForSenderReady waits for the CROC coordination file to appear
+func (t *SimpleCrocTransport) waitForSenderReady(transferID string, timeout time.Duration) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	coordFile := filepath.Join(homeDir, ".trustdrop", fmt.Sprintf("croc_%s.coord", transferID))
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(coordFile); err == nil {
+			fmt.Printf("📡 CROC sender ready signal detected\n")
+			return nil
+		}
+		time.Sleep(2 * time.Second) // Check every 2 seconds
+	}
+
+	return fmt.Errorf("CROC sender ready signal not found within %v", timeout)
 }
 
 // IsAvailable checks if the croc transport is available

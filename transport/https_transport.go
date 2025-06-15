@@ -7,6 +7,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -51,8 +53,35 @@ func (t *DirectHTTPSTransport) Send(data []byte, metadata TransferMetadata) erro
 	t.transfers[metadata.TransferID] = data
 	t.mutex.Unlock()
 
+	// Create coordination file to signal readiness
+	if err := t.createCoordinationFile(metadata.TransferID); err != nil {
+		fmt.Printf("Warning: Could not create coordination file: %v\n", err)
+	}
+
 	// Start temporary HTTPS server for direct peer connection
 	return t.startP2PServer(metadata.TransferID)
+}
+
+// createCoordinationFile creates a file to signal server readiness
+func (t *DirectHTTPSTransport) createCoordinationFile(transferID string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	coordDir := filepath.Join(homeDir, ".trustdrop")
+	if err := os.MkdirAll(coordDir, 0755); err != nil {
+		return err
+	}
+
+	// Get local IP addresses
+	localIPs := t.getLocalNetworkIPs()
+
+	// Create coordination info
+	coordInfo := fmt.Sprintf("ready\nport:8080\nips:%s\n", strings.Join(localIPs, ","))
+
+	coordFile := filepath.Join(coordDir, fmt.Sprintf("transfer_%s.coord", transferID))
+	return os.WriteFile(coordFile, []byte(coordInfo), 0644)
 }
 
 // startP2PServer creates a temporary server for direct peer connection
@@ -140,29 +169,23 @@ func (t *DirectHTTPSTransport) handleDirectTransfer(w http.ResponseWriter, r *ht
 	t.mutex.Lock()
 	delete(t.transfers, transferID)
 	t.mutex.Unlock()
+
+	fmt.Printf("✅ Successfully served transfer %s\n", transferID)
 }
 
 // Receive implements direct P2P HTTPS connection
 func (t *DirectHTTPSTransport) Receive(metadata TransferMetadata) ([]byte, error) {
 	fmt.Println("🔒 Direct HTTPS: Attempting to receive from local network...")
 
-	// Try common local network addresses where the sender might be (both HTTPS and HTTP)
-	localAddresses := []string{
-		"localhost:8443",
-		"127.0.0.1:8443",
-		"localhost:8080",
-		"127.0.0.1:8080",
+	// Wait for coordination file to appear (sender ready signal)
+	if err := t.waitForSenderReady(metadata.TransferID, 30*time.Second); err != nil {
+		fmt.Printf("⏰ Sender not ready yet: %v\n", err)
 	}
 
-	// Also try to discover local network IPs
-	if localIPs := t.getLocalNetworkIPs(); len(localIPs) > 0 {
-		for _, ip := range localIPs {
-			localAddresses = append(localAddresses, fmt.Sprintf("%s:8443", ip))
-			localAddresses = append(localAddresses, fmt.Sprintf("%s:8080", ip))
-		}
-	}
+	// Get potential sender addresses from coordination file and network discovery
+	addresses := t.discoverSenderAddresses(metadata.TransferID)
 
-	for _, addr := range localAddresses {
+	for _, addr := range addresses {
 		fmt.Printf("🔍 Trying to connect to: %s\n", addr)
 
 		// Create HTTP client with timeout
@@ -185,6 +208,7 @@ func (t *DirectHTTPSTransport) Receive(metadata TransferMetadata) ([]byte, error
 			}
 			url = fmt.Sprintf("http://%s/transfer/%s", addr, metadata.TransferID)
 		}
+
 		resp, err := client.Get(url)
 		if err != nil {
 			fmt.Printf("❌ Failed to connect to %s: %v\n", addr, err)
@@ -207,6 +231,73 @@ func (t *DirectHTTPSTransport) Receive(metadata TransferMetadata) ([]byte, error
 	}
 
 	return nil, fmt.Errorf("could not connect to any local HTTPS servers for transfer %s", metadata.TransferID)
+}
+
+// waitForSenderReady waits for the coordination file to appear
+func (t *DirectHTTPSTransport) waitForSenderReady(transferID string, timeout time.Duration) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	coordFile := filepath.Join(homeDir, ".trustdrop", fmt.Sprintf("transfer_%s.coord", transferID))
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(coordFile); err == nil {
+			fmt.Printf("📡 Sender ready signal detected\n")
+			return nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	return fmt.Errorf("sender ready signal not found within %v", timeout)
+}
+
+// discoverSenderAddresses discovers potential sender addresses
+func (t *DirectHTTPSTransport) discoverSenderAddresses(transferID string) []string {
+	var addresses []string
+
+	// Try to read coordination file for sender IPs
+	homeDir, _ := os.UserHomeDir()
+	coordFile := filepath.Join(homeDir, ".trustdrop", fmt.Sprintf("transfer_%s.coord", transferID))
+
+	if data, err := os.ReadFile(coordFile); err == nil {
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "ips:") {
+				ips := strings.Split(strings.TrimPrefix(line, "ips:"), ",")
+				for _, ip := range ips {
+					ip = strings.TrimSpace(ip)
+					if ip != "" {
+						addresses = append(addresses, fmt.Sprintf("%s:8080", ip))
+						addresses = append(addresses, fmt.Sprintf("%s:8443", ip))
+					}
+				}
+			}
+		}
+	}
+
+	// Add common local addresses as fallback
+	fallbackAddresses := []string{
+		"localhost:8443",
+		"127.0.0.1:8443",
+		"localhost:8080",
+		"127.0.0.1:8080",
+	}
+
+	// Also try to discover local network IPs
+	if localIPs := t.getLocalNetworkIPs(); len(localIPs) > 0 {
+		for _, ip := range localIPs {
+			fallbackAddresses = append(fallbackAddresses, fmt.Sprintf("%s:8443", ip))
+			fallbackAddresses = append(fallbackAddresses, fmt.Sprintf("%s:8080", ip))
+		}
+	}
+
+	// Combine coordination file IPs with fallback addresses
+	addresses = append(addresses, fallbackAddresses...)
+
+	return addresses
 }
 
 // getLocalNetworkIPs returns local network IP addresses
