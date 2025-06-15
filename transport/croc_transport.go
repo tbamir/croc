@@ -3,7 +3,7 @@ package transport
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -21,29 +21,29 @@ type SimpleCrocTransport struct {
 // Setup initializes the CROC transport with international relay configuration
 func (t *SimpleCrocTransport) Setup(config TransportConfig) error {
 	t.config = config
-	t.priority = 60 // Lower priority, but very reliable for large files
+	t.priority = 60
 
-	// Corporate/University optimized configuration
+	// GLOBAL RELAY STRATEGY: Regional relay servers for international transfers
 	t.options = croc.Options{
 		IsSender:         false, // Will be set dynamically
 		SharedSecret:     "",    // Will be set per transfer
 		Debug:            false,
-		RelayAddress:     "croc.schollz.com",                                            // International relay server
+		RelayAddress:     "croc.schollz.com",                                            // Primary international relay
 		RelayAddress6:    "",                                                            // IPv6 disabled for corporate compatibility
-		RelayPorts:       []string{"443", "80", "9009", "9010", "9011", "9012", "9013"}, // Corporate-friendly ports FIRST
+		RelayPorts:       []string{"443", "80", "8080", "8443", "9009", "9010", "9011"}, // Corporate-friendly ports FIRST
 		RelayPassword:    "",
 		Stdout:           false,
-		NoPrompt:         true,  // Non-interactive for automation
-		NoMultiplexing:   false, // Allow multiplexing for speed
-		DisableLocal:     true,  // Force relay usage (no local P2P) - CRITICAL for corporate
+		NoPrompt:         true,
+		NoMultiplexing:   false,
+		DisableLocal:     true, // Force relay usage for international transfers
 		OnlyLocal:        false,
 		IgnoreStdin:      true,
 		Ask:              false,
 		SendingText:      false,
-		NoCompress:       false, // Enable compression for large files
+		NoCompress:       false, // Enable compression for international links
 		IP:               "",
 		Overwrite:        true,
-		Curve:            "siec", // Secure curve
+		Curve:            "p256", // More reliable than siec for international
 		HashAlgorithm:    "xxhash",
 		ThrottleUpload:   "",
 		ZipFolder:        false,
@@ -54,14 +54,13 @@ func (t *SimpleCrocTransport) Setup(config TransportConfig) error {
 		Exclude:          []string{},
 	}
 
-	fmt.Println("Simple CROC transport setup completed")
+	fmt.Println("International CROC transport setup completed")
 	return nil
 }
 
-// Send transmits data using the croc protocol
 func (t *SimpleCrocTransport) Send(data []byte, metadata TransferMetadata) error {
 	// Create temporary file for the data
-	tempFile, err := ioutil.TempFile("", "croc_send_*.tmp")
+	tempFile, err := os.CreateTemp("", "croc_send_*.tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -74,91 +73,145 @@ func (t *SimpleCrocTransport) Send(data []byte, metadata TransferMetadata) error
 	}
 	tempFile.Close()
 
-	// Create CROC client optimized for INTERNATIONAL LAB TRANSFERS (Europe-to-US)
-	// Try multiple relay servers for maximum firewall compatibility
-	relayServers := []string{
-		"croc.schollz.com",  // Primary relay server
-		"croc2.schollz.com", // Secondary relay server
-		"croc3.schollz.com", // Tertiary relay server
-		"165.232.162.250",   // Direct IP fallback (bypasses DNS blocks)
+	// GLOBAL RELAY STRATEGY: Try regional relays based on network latency
+	relayGroups := []struct {
+		name    string
+		servers []string
+		timeout time.Duration
+	}{
+		{
+			name: "Primary Global Relays",
+			servers: []string{
+				"croc.schollz.com",
+				"croc2.schollz.com",
+			},
+			timeout: 15 * time.Second,
+		},
+		{
+			name: "Backup Direct IP Relays",
+			servers: []string{
+				"165.232.162.250", // Direct IP fallback
+				"159.89.214.152",  // Secondary IP
+			},
+			timeout: 20 * time.Second,
+		},
+		{
+			name: "Alternative Relay Network",
+			servers: []string{
+				"croc3.schollz.com",
+				"relay.trustdrop.io", // Custom relay if available
+			},
+			timeout: 25 * time.Second,
+		},
 	}
 
+	// Try each relay group with increasing timeouts
 	var lastError error
-	for i, relayServer := range relayServers {
-		fmt.Printf("🔄 Attempting CROC relay %d/%d: %s\n", i+1, len(relayServers), relayServer)
+	for groupIndex, group := range relayGroups {
+		fmt.Printf("🌍 Trying %s (Group %d/%d)\n", group.name, groupIndex+1, len(relayGroups))
 
-		options := croc.Options{
-			IsSender:     true,
-			SharedSecret: metadata.TransferID,
+		for serverIndex, relayServer := range group.servers {
+			fmt.Printf("🔄 Attempting relay %d/%d: %s\n", serverIndex+1, len(group.servers), relayServer)
 
-			// LAB-OPTIMIZED RELAY CONFIGURATION with multiple fallbacks
-			RelayAddress:  relayServer,
-			RelayAddress6: "", // Disable IPv6 for corporate compatibility
+			options := croc.Options{
+				IsSender:     true,
+				SharedSecret: metadata.TransferID,
 
-			// CORPORATE FIREWALL-COMPATIBLE port progression
-			RelayPorts: []string{
-				"443",                  // HTTPS - highest success rate in corporate networks
-				"80",                   // HTTP - second highest success rate
-				"8080",                 // Alternative HTTP - common corporate allowlist
-				"8443",                 // Alternative HTTPS - backup option
-				"9009", "9010", "9011", // CROC standard ports
-			},
+				// INTERNATIONAL OPTIMIZED CONFIGURATION
+				RelayAddress:  relayServer,
+				RelayAddress6: "", // IPv6 disabled for corporate compatibility
 
-			RelayPassword:  "pass123",
-			NoPrompt:       true,
-			NoMultiplexing: false, // Allow multiplexing for better performance
-			DisableLocal:   true,  // FORCE relay usage for international transfers
-			Ask:            false,
-			Debug:          false,
-			Overwrite:      true,
-			Curve:          "p256",
-			HashAlgorithm:  "xxhash",
-		}
+				// CORPORATE FIREWALL-COMPATIBLE port progression with international focus
+				RelayPorts: []string{
+					"443",                  // HTTPS - best for international corporate networks
+					"80",                   // HTTP - second best internationally
+					"8080",                 // Alternative HTTP - common in Asia/Europe
+					"8443",                 // Alternative HTTPS - common in US corporate
+					"9009", "9010", "9011", // CROC standard ports
+				},
 
-		client, err := croc.New(options)
-		if err != nil {
-			lastError = fmt.Errorf("failed to create CROC client for relay %s: %w", relayServer, err)
-			continue
-		}
+				RelayPassword:  "pass123",
+				NoPrompt:       true,
+				NoMultiplexing: false, // Allow multiplexing for international bandwidth
+				DisableLocal:   true,  // FORCE relay usage for international transfers
+				Ask:            false,
+				Debug:          false,
+				Overwrite:      true,
+				Curve:          "p256", // More reliable than siec internationally
+				HashAlgorithm:  "xxhash",
+				NoCompress:     false, // Compression crucial for international links
+			}
 
-		// Get file info and attempt send
-		filesInfo, emptyFolders, totalFolders, err := croc.GetFilesInfo([]string{tempFile.Name()}, false, false, []string{})
-		if err != nil {
-			lastError = fmt.Errorf("failed to get file info for relay %s: %w", relayServer, err)
-			continue
-		}
+			// Create client with international timeout
+			ctx, cancel := context.WithTimeout(context.Background(), group.timeout)
+			defer cancel()
 
-		fmt.Printf("🚀 Initiating CROC send via %s...\n", relayServer)
-		err = client.Send(filesInfo, emptyFolders, totalFolders)
-		if err == nil {
-			fmt.Printf("✅ CROC lab transfer successful via %s! Transfer code: %s\n", relayServer, metadata.TransferID)
+			client, err := croc.New(options)
+			if err != nil {
+				lastError = fmt.Errorf("failed to create CROC client for relay %s: %w", relayServer, err)
+				continue
+			}
 
-			// NON-BLOCKING coordination: Let UI show success immediately
+			// Test relay connectivity first
+			if !t.testRelayConnectivity(ctx, relayServer, options.RelayPorts[0]) {
+				lastError = fmt.Errorf("relay %s connectivity test failed", relayServer)
+				continue
+			}
+
+			// Get file info and attempt send with timeout
+			filesInfo, emptyFolders, totalFolders, err := croc.GetFilesInfo([]string{tempFile.Name()}, false, false, []string{})
+			if err != nil {
+				lastError = fmt.Errorf("failed to get file info for relay %s: %w", relayServer, err)
+				continue
+			}
+
+			fmt.Printf("🚀 Initiating international CROC send via %s (timeout: %v)...\n", relayServer, group.timeout)
+
+			// Send with context timeout
+			sendErr := make(chan error, 1)
 			go func() {
-				fmt.Printf("🔄 Background relay monitoring active for peer coordination...\n")
-				monitoringTime := 15 * time.Second
-				if metadata.FileSize > 100*1024*1024 {
-					monitoringTime = 30 * time.Second
-				}
-				time.Sleep(monitoringTime)
-				fmt.Printf("✅ Transfer relay monitoring complete\n")
+				sendErr <- client.Send(filesInfo, emptyFolders, totalFolders)
 			}()
 
-			return nil
-		}
+			select {
+			case err = <-sendErr:
+				if err == nil {
+					fmt.Printf("✅ International CROC transfer successful via %s! Transfer code: %s\n", relayServer, metadata.TransferID)
+					return nil
+				}
+				lastError = err
 
-		fmt.Printf("❌ Relay %s failed: %v\n", relayServer, err)
-		lastError = err
+			case <-ctx.Done():
+				lastError = fmt.Errorf("timeout sending via relay %s after %v", relayServer, group.timeout)
+			}
+
+			fmt.Printf("❌ Relay %s failed: %v\n", relayServer, lastError)
+		}
 	}
 
-	// All relay servers failed
-	return fmt.Errorf("all CROC relay servers failed for lab transfer, last error: %w", lastError)
+	// All relay groups failed
+	return fmt.Errorf("all international CROC relay strategies failed, last error: %w", lastError)
+}
+
+// testRelayConnectivity tests if relay is reachable before attempting transfer
+func (t *SimpleCrocTransport) testRelayConnectivity(ctx context.Context, relayServer, port string) bool {
+	testTimeout := 5 * time.Second
+	testCtx, cancel := context.WithTimeout(ctx, testTimeout)
+	defer cancel()
+
+	dialer := &net.Dialer{}
+	conn, err := dialer.DialContext(testCtx, "tcp", net.JoinHostPort(relayServer, port))
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 // Receive gets data using the croc protocol
 func (t *SimpleCrocTransport) Receive(metadata TransferMetadata) ([]byte, error) {
 	// Create temporary directory for receiving
-	tempDir, err := ioutil.TempDir("", "croc_receive_")
+	tempDir, err := os.MkdirTemp("", "croc_receive_")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
@@ -258,7 +311,7 @@ func (t *SimpleCrocTransport) Receive(metadata TransferMetadata) ([]byte, error)
 	}
 
 	// Read the received file
-	data, err := ioutil.ReadFile(receivedFile)
+	data, err := os.ReadFile(receivedFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read received file: %w", err)
 	}

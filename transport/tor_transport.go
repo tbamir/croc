@@ -229,14 +229,6 @@ func (t *TorTransport) cleanupHiddenService(service string) {
 	// Clean up temporary hidden service
 }
 
-func (t *TorTransport) createFileHandler(data []byte, metadata TransferMetadata) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", metadata.FileName))
-		w.Write(data)
-	})
-}
-
 func (t *TorTransport) extractHiddenServiceURL(_ string) string {
 	// Extract hidden service URL from transfer ID
 	// This would parse the transfer ID to get the .onion address

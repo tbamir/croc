@@ -1,7 +1,9 @@
 package internal
 
 import (
+	"crypto/rand"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -136,4 +138,21 @@ func SanitizePath(path string) string {
 	}
 
 	return filepath.Join(dir, sanitizedFilename)
+}
+
+// GetRandomName generates a random transfer code using simple word combinations
+func GetRandomName() string {
+	// Simple word lists for transfer codes
+	adjectives := []string{"quick", "bright", "calm", "bold", "swift", "clear", "smart", "safe", "fast", "cool"}
+	nouns := []string{"tiger", "eagle", "wolf", "bear", "lion", "hawk", "fox", "deer", "owl", "cat"}
+
+	// Generate random indices
+	adjIdx, _ := rand.Int(rand.Reader, big.NewInt(int64(len(adjectives))))
+	nounIdx, _ := rand.Int(rand.Reader, big.NewInt(int64(len(nouns))))
+
+	// Generate random 3-digit number
+	numIdx, _ := rand.Int(rand.Reader, big.NewInt(900))
+	num := numIdx.Int64() + 100 // Ensures 3 digits (100-999)
+
+	return fmt.Sprintf("%s-%s-%d", adjectives[adjIdx.Int64()], nouns[nounIdx.Int64()], num)
 }

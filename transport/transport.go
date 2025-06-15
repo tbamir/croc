@@ -192,24 +192,25 @@ func (mtm *MultiTransportManager) initializeTransports() error {
 	return nil
 }
 
-// analyzeNetworkEnvironment performs comprehensive network analysis
 func (mtm *MultiTransportManager) analyzeNetworkEnvironment() {
-	fmt.Printf("Starting comprehensive network environment analysis...\n")
+	fmt.Printf("Starting international network environment analysis...\n")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second) // Extended for international
 	defer cancel()
 
 	profile := NetworkProfile{
-		AvailablePorts: []int{80, 443}, // Always assume HTTP/HTTPS work
+		AvailablePorts: []int{80, 443}, // Always assume HTTP/HTTPS work internationally
 	}
 
-	// Comprehensive network detection
+	// International-specific network detection
 	mtm.detectInstitutionalNetwork(&profile)
 	mtm.detectProxyEnvironment(&profile)
 	mtm.detectFirewallRestrictions(&profile)
 	mtm.detectDPIInterference(&profile)
+	mtm.detectInternationalLatency(&profile, ctx) // New international latency detection
 	mtm.testPortConnectivity(&profile, ctx)
 	mtm.testDNSFiltering(&profile, ctx)
+	mtm.testInternationalConnectivity(&profile, ctx) // New international connectivity test
 	mtm.testP2PCapability(&profile, ctx)
 
 	// Determine overall network type and restrictions
@@ -222,18 +223,18 @@ func (mtm *MultiTransportManager) analyzeNetworkEnvironment() {
 	mtm.mutex.Unlock()
 
 	restrictiveness := mtm.calculateRestrictiveness()
-	fmt.Printf("Network analysis complete: %s network, restrictiveness: %.1f%%\n",
-		profile.NetworkType, restrictiveness*100)
+	fmt.Printf("International network analysis complete: %s network, restrictiveness: %.1f%%, international ready: %t\n",
+		profile.NetworkType, restrictiveness*100, profile.SupportsUDP)
 
 	if len(mtm.networkRestrictions) > 0 {
-		fmt.Printf("Detected %d network restrictions\n", len(mtm.networkRestrictions))
+		fmt.Printf("Detected %d network restrictions for international transfer\n", len(mtm.networkRestrictions))
 		for _, restriction := range mtm.networkRestrictions {
 			fmt.Printf("  - %s (%s): %s\n", restriction.Type, restriction.Severity, restriction.Description)
 		}
 	}
 
-	// Log recommended transport
-	fmt.Printf("Recommended transport: %s\n", profile.PreferredTransport)
+	// Log recommended transport for international
+	fmt.Printf("Recommended transport for international transfer: %s\n", profile.PreferredTransport)
 }
 
 // detectInstitutionalNetwork detects corporate/university networks
@@ -619,6 +620,75 @@ func (mtm *MultiTransportManager) testSTUNConnectivity() bool {
 	return false
 }
 
+// detectInternationalLatency measures latency to international endpoints
+func (mtm *MultiTransportManager) detectInternationalLatency(profile *NetworkProfile, _ context.Context) {
+	internationalEndpoints := []string{
+		"8.8.8.8:53",        // Google DNS (US)
+		"1.1.1.1:53",        // Cloudflare DNS (Global)
+		"208.67.222.222:53", // OpenDNS (US)
+		"9.9.9.9:53",        // Quad9 DNS (Global)
+	}
+
+	var totalLatency time.Duration
+	var successfulTests int
+
+	for _, endpoint := range internationalEndpoints {
+		start := time.Now()
+		conn, err := net.DialTimeout("tcp", endpoint, 10*time.Second)
+		latency := time.Since(start)
+
+		if err == nil {
+			conn.Close()
+			totalLatency += latency
+			successfulTests++
+		}
+	}
+
+	if successfulTests > 0 {
+		avgLatency := totalLatency / time.Duration(successfulTests)
+		profile.Latency = int(avgLatency.Milliseconds())
+
+		// Classify network quality for international transfers
+		if avgLatency > 500*time.Millisecond {
+			profile.NetworkType = "high-latency-international"
+			mtm.detectionResults["high_international_latency"] = true
+		} else if avgLatency > 200*time.Millisecond {
+			profile.NetworkType = "moderate-latency-international"
+		}
+
+		fmt.Printf("International latency: %v (avg from %d endpoints)\n", avgLatency, successfulTests)
+	}
+}
+
+// testInternationalConnectivity tests specific international relay endpoints
+func (mtm *MultiTransportManager) testInternationalConnectivity(profile *NetworkProfile, _ context.Context) {
+	internationalRelays := []string{
+		"croc.schollz.com:443",
+		"croc.schollz.com:80",
+		"croc2.schollz.com:443",
+		"165.232.162.250:443", // Direct IP
+	}
+
+	var workingRelays int
+	for _, relay := range internationalRelays {
+		conn, err := net.DialTimeout("tcp", relay, 10*time.Second)
+
+		if err == nil {
+			conn.Close()
+			workingRelays++
+		}
+	}
+
+	profile.HasWebRTC = workingRelays > 0 // Repurpose this field for relay connectivity
+
+	if workingRelays == 0 {
+		mtm.detectionResults["international_relays_blocked"] = true
+		profile.IsRestrictive = true
+	}
+
+	fmt.Printf("International relay connectivity: %d/%d relays accessible\n", workingRelays, len(internationalRelays))
+}
+
 // classifyNetworkType determines the overall network type
 func (mtm *MultiTransportManager) classifyNetworkType(profile *NetworkProfile) {
 	// Start with default
@@ -899,16 +969,15 @@ func (mtm *MultiTransportManager) buildFailureErrorMessage(lastErr error) string
 	return errorMsg.String()
 }
 
-// getOrderedTransports returns transports ordered by effectiveness for current network
 func (mtm *MultiTransportManager) getOrderedTransports() []Transport {
 	transports := make([]Transport, len(mtm.transports))
 	copy(transports, mtm.transports)
 
-	// Sort by network-aware priority
+	// INTERNATIONAL TRANSFER OPTIMIZATION: Smart ordering based on network conditions
 	for i := 0; i < len(transports)-1; i++ {
 		for j := i + 1; j < len(transports); j++ {
-			iPriority := mtm.getEffectivePriority(transports[i])
-			jPriority := mtm.getEffectivePriority(transports[j])
+			iPriority := mtm.getInternationalEffectivePriority(transports[i])
+			jPriority := mtm.getInternationalEffectivePriority(transports[j])
 
 			if jPriority > iPriority {
 				transports[i], transports[j] = transports[j], transports[i]
@@ -919,22 +988,54 @@ func (mtm *MultiTransportManager) getOrderedTransports() []Transport {
 	return transports
 }
 
-// getEffectivePriority calculates priority based on network conditions
-func (mtm *MultiTransportManager) getEffectivePriority(transport Transport) int {
+// getInternationalEffectivePriority calculates priority for international transfers
+func (mtm *MultiTransportManager) getInternationalEffectivePriority(transport Transport) int {
 	basePriority := transport.GetPriority()
 	transportName := transport.GetName()
 
-	// Use natural transport priorities for proper failover
-	// HTTPS (95) -> WebSocket (70) -> CROC (60) -> Tor (50)
+	// INTERNATIONAL NETWORK ADJUSTMENTS
+	if mtm.networkProfile.IsRestrictive {
+		switch transportName {
+		case "simple-croc":
+			basePriority += 25 // Boost CROC for restrictive international networks
+		case "direct-https-p2p":
+			basePriority += 15 // Boost direct HTTPS for secure international links
+		case "ice-webrtc":
+			basePriority -= 10 // Reduce ICE priority for restrictive networks
+		}
+	}
 
-	// Apply success/failure history
+	// LATENCY-BASED ADJUSTMENTS
+	if mtm.networkProfile.Latency > 300 { // High international latency
+		switch transportName {
+		case "simple-croc":
+			basePriority += 20 // CROC handles high latency well
+		case "websocket":
+			basePriority -= 15 // WebSocket sensitive to latency
+		}
+	}
+
+	// SUCCESS HISTORY BOOST (more aggressive for international)
 	if successCount, exists := mtm.successHistory[transportName]; exists {
 		if successCount > 0 {
-			return basePriority + (successCount * 5) // Boost based on success history
+			basePriority += (successCount * 10) // Higher boost for international success
+		}
+	}
+
+	// BANDWIDTH CONSIDERATIONS
+	if mtm.networkProfile.Bandwidth > 0 && mtm.networkProfile.Bandwidth < 10*1024*1024 { // < 10 Mbps
+		switch transportName {
+		case "simple-croc":
+			basePriority += 15 // CROC has good compression
 		}
 	}
 
 	return basePriority
+}
+
+// getEffectivePriority calculates priority based on network conditions (legacy compatibility)
+func (mtm *MultiTransportManager) getEffectivePriority(transport Transport) int {
+	return mtm.getInternationalEffectivePriority(transport)
 }
 
 // GetNetworkProfile returns the analyzed network profile

@@ -20,7 +20,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"trustdrop-bulletproof/assets"
-	"trustdrop-bulletproof/src/utils"
+	"trustdrop-bulletproof/internal"
 	"trustdrop-bulletproof/transfer"
 	"trustdrop-bulletproof/transport"
 )
@@ -146,32 +146,31 @@ func (ba *BulletproofApp) setupUI() {
 	ba.showMainView()
 }
 
-// createMainView creates the main menu with comprehensive network status
 func (ba *BulletproofApp) createMainView() {
-	// App title
-	title := widget.NewLabelWithStyle("TrustDrop Bulletproof",
+	// App title with international focus
+	title := widget.NewLabelWithStyle("TrustDrop International",
 		fyne.TextAlignCenter,
 		fyne.TextStyle{Bold: true})
 
-	subtitle := widget.NewLabel("Enterprise-grade P2P file transfer")
+	subtitle := widget.NewLabel("Global lab-to-lab secure file transfer")
 	subtitle.Alignment = fyne.TextAlignCenter
 
 	// Send button - large and prominent
-	sendBtn := widget.NewButton("Send Files", func() {
+	sendBtn := widget.NewButton("Send Files Globally", func() {
 		ba.showSendView()
 	})
 	sendBtn.Importance = widget.HighImportance
 	sendBtn.Icon = theme.MailSendIcon()
 
 	// Receive button - large and prominent
-	receiveBtn := widget.NewButton("Receive Files", func() {
+	receiveBtn := widget.NewButton("Receive International Files", func() {
 		ba.showReceiveView()
 	})
 	receiveBtn.Importance = widget.MediumImportance
 	receiveBtn.Icon = theme.DownloadIcon()
 
-	// Network status section with detailed information
-	networkStatus := ba.createNetworkStatusWidget()
+	// Network status section with international context
+	networkStatus := ba.createInternationalNetworkStatusWidget()
 
 	// Layout
 	content := container.NewVBox(
@@ -195,10 +194,9 @@ func (ba *BulletproofApp) createMainView() {
 	ba.mainContent = container.NewCenter(content)
 }
 
-// createNetworkStatusWidget creates a simple network status display
-func (ba *BulletproofApp) createNetworkStatusWidget() *fyne.Container {
-	ba.networkStatusIcon = widget.NewLabel("🔄") // Default: analyzing
-	ba.networkStatusLabel = widget.NewLabel("Analyzing network environment...")
+func (ba *BulletproofApp) createInternationalNetworkStatusWidget() *fyne.Container {
+	ba.networkStatusIcon = widget.NewLabel("🌍") // International icon
+	ba.networkStatusLabel = widget.NewLabel("Analyzing international network connectivity...")
 	ba.networkStatusLabel.Alignment = fyne.TextAlignCenter
 
 	statusContainer := container.NewBorder(
@@ -209,7 +207,7 @@ func (ba *BulletproofApp) createNetworkStatusWidget() *fyne.Container {
 	)
 
 	return container.NewVBox(
-		widget.NewLabelWithStyle("Network Status", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("International Network Status", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 		statusContainer,
 	)
 }
@@ -1095,5 +1093,5 @@ func (ba *BulletproofApp) setupCallbacks() {
 }
 
 func generateTransferCode() string {
-	return utils.GetRandomName()
+	return internal.GetRandomName()
 }

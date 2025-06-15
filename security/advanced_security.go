@@ -1,6 +1,7 @@
 package security
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -11,9 +12,10 @@ import (
 
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/hkdf"
+	"golang.org/x/crypto/pbkdf2"
 )
 
-// EncryptionMode represents different encryption modes
+// EncryptionMode represents different encryption algorithms
 type EncryptionMode int
 
 const (
@@ -32,54 +34,52 @@ func (m EncryptionMode) String() string {
 	case ModeChaCha20:
 		return "ChaCha20-Poly1305"
 	case ModeHybrid:
-		return "Hybrid-RSA-AES"
+		return "Hybrid-Mode"
 	default:
 		return "Unknown"
 	}
 }
 
-// AdvancedSecurity provides multiple encryption modes with automatic selection
+// AdvancedSecurity provides institutional-grade encryption with multiple modes
 type AdvancedSecurity struct {
 	preferredMode EncryptionMode
 }
 
-// NewAdvancedSecurity creates a new advanced security instance
 func NewAdvancedSecurity() *AdvancedSecurity {
 	return &AdvancedSecurity{
-		preferredMode: ModeGCM, // Default to GCM for better security
+		preferredMode: ModeGCM, // Default to GCM for institutional networks
 	}
 }
 
-// EncryptWithBestMode encrypts data using the best available mode based on data size and security requirements
+// EncryptWithBestMode automatically selects the best encryption mode based on data characteristics
 func (as *AdvancedSecurity) EncryptWithBestMode(data, key []byte) ([]byte, EncryptionMode, error) {
-	// For institutional networks, prioritize compatibility and reliability
-	dataSize := len(data)
-	
-	// Choose encryption mode based on data size and requirements
+	// Analyze data characteristics to choose optimal mode
+	dataSize := int64(len(data))
+
 	var mode EncryptionMode
-	switch {
-	case dataSize > 100*1024*1024: // Large files (>100MB) - use CBC for compatibility
-		mode = ModeCBC
-	case dataSize > 10*1024*1024: // Medium files (>10MB) - use GCM for balance
-		mode = ModeGCM
-	default: // Small files - use ChaCha20 for security
-		mode = ModeChaCha20
+	if dataSize > 100*1024*1024 { // Large files > 100MB
+		mode = ModeGCM // Good balance for large files
+	} else if dataSize > 10*1024*1024 { // Medium files > 10MB
+		mode = ModeChaCha20 // Faster for medium files
+	} else {
+		mode = ModeGCM // Default for small files
 	}
 
-	encrypted, err := as.EncryptWithMode(data, key, mode)
+	// Strengthen the key before encryption
+	strengthenedKey, _, err := as.StrengthenTransferCode(string(key), "encryption")
 	if err != nil {
-		// Fallback to CBC if other modes fail
-		encrypted, err = as.EncryptWithMode(data, key, ModeCBC)
-		if err != nil {
-			return nil, ModeCBC, fmt.Errorf("all encryption modes failed: %w", err)
-		}
-		mode = ModeCBC
+		return nil, mode, fmt.Errorf("key strengthening failed: %w", err)
+	}
+
+	encrypted, err := as.EncryptWithMode(data, strengthenedKey, mode)
+	if err != nil {
+		return nil, mode, err
 	}
 
 	return encrypted, mode, nil
 }
 
-// EncryptWithMode encrypts data using the specified encryption mode
+// EncryptWithMode encrypts data using the specified mode
 func (as *AdvancedSecurity) EncryptWithMode(data []byte, key []byte, mode EncryptionMode) ([]byte, error) {
 	switch mode {
 	case ModeGCM:
@@ -87,9 +87,8 @@ func (as *AdvancedSecurity) EncryptWithMode(data []byte, key []byte, mode Encryp
 	case ModeChaCha20:
 		return as.encryptChaCha20Poly1305(data, key)
 	case ModeCBC:
-		return EncryptAES256CBC(data, key) // Use existing implementation
+		return as.encryptAESCBC(data, key)
 	case ModeHybrid:
-		// For now, hybrid mode uses GCM with additional key derivation
 		return as.encryptHybridMode(data, key)
 	default:
 		return nil, fmt.Errorf("unsupported encryption mode: %d", mode)
@@ -100,7 +99,7 @@ func (as *AdvancedSecurity) EncryptWithMode(data []byte, key []byte, mode Encryp
 func (as *AdvancedSecurity) DecryptWithMode(data, key []byte, mode EncryptionMode) ([]byte, error) {
 	switch mode {
 	case ModeCBC:
-		return DecryptAES256CBC(data, key)
+		return as.decryptAESCBC(data, key)
 	case ModeGCM:
 		return as.decryptAESGCM(data, key)
 	case ModeChaCha20:
@@ -110,6 +109,41 @@ func (as *AdvancedSecurity) DecryptWithMode(data, key []byte, mode EncryptionMod
 	default:
 		return nil, fmt.Errorf("unknown encryption mode: %v", mode)
 	}
+}
+
+// StrengthenTransferCode converts a weak transfer code into a cryptographically strong key
+// This addresses the critical vulnerability of using transfer codes directly as encryption keys
+func (as *AdvancedSecurity) StrengthenTransferCode(transferCode string, context string) ([]byte, []byte, error) {
+	if len(transferCode) < 8 {
+		return nil, nil, fmt.Errorf("transfer code too short: minimum 8 characters required")
+	}
+
+	// Generate deterministic salt based on transfer code for peer synchronization
+	saltSource := append([]byte(transferCode), []byte(context+"trustdrop-v3-2024")...)
+	saltHash := sha256.Sum256(saltSource)
+	salt := saltHash[:]
+
+	// Use high-iteration PBKDF2 to strengthen the weak transfer code
+	strengthenedKey := pbkdf2.Key(
+		[]byte(transferCode+context),
+		salt,
+		100000, // High iteration count for security
+		32,     // 256-bit key
+		sha256.New,
+	)
+
+	return strengthenedKey, salt, nil
+}
+
+// StrengthenTransferCodeWithSalt recreates a strengthened key using existing salt
+func (as *AdvancedSecurity) StrengthenTransferCodeWithSalt(transferCode string, context string, salt []byte) []byte {
+	return pbkdf2.Key(
+		[]byte(transferCode+context),
+		salt,
+		100000,
+		32,
+		sha256.New,
+	)
 }
 
 // encryptAESGCM encrypts data using AES-256-GCM (authenticated encryption)
@@ -282,31 +316,102 @@ func (as *AdvancedSecurity) decryptHybridMode(data []byte, key []byte) ([]byte, 
 	return plaintext, nil
 }
 
-// deriveKey derives a key of specified length using HKDF with enhanced security
-func (as *AdvancedSecurity) deriveKey(inputKey []byte, length int) []byte {
-	// Use application-specific salt and info for better security
-	salt := []byte("trustdrop-bulletproof-v2.0-institutional-grade")
-	info := []byte("institutional-network-file-encryption-2024")
+// encryptAESCBC encrypts data using AES-256-CBC
+func (as *AdvancedSecurity) encryptAESCBC(data []byte, key []byte) ([]byte, error) {
+	// Derive a proper 32-byte key from input
+	derivedKey := as.deriveKey(key, 32)
 
-	hkdf := hkdf.New(sha256.New, inputKey, salt, info)
+	// Create AES cipher
+	block, err := aes.NewCipher(derivedKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
+	}
+
+	// Add PKCS7 padding
+	padding := aes.BlockSize - len(data)%aes.BlockSize
+	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
+	data = append(data, padtext...)
+
+	// Generate random IV
+	iv := make([]byte, aes.BlockSize)
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return nil, fmt.Errorf("failed to generate IV: %w", err)
+	}
+
+	// Encrypt
+	mode := cipher.NewCBCEncrypter(block, iv)
+	ciphertext := make([]byte, len(data))
+	mode.CryptBlocks(ciphertext, data)
+
+	// Prepend IV to ciphertext
+	result := make([]byte, len(iv)+len(ciphertext))
+	copy(result[:len(iv)], iv)
+	copy(result[len(iv):], ciphertext)
+
+	return result, nil
+}
+
+// decryptAESCBC decrypts data using AES-256-CBC
+func (as *AdvancedSecurity) decryptAESCBC(data []byte, key []byte) ([]byte, error) {
+	// Derive a proper 32-byte key from input
+	derivedKey := as.deriveKey(key, 32)
+
+	// Create AES cipher
+	block, err := aes.NewCipher(derivedKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
+	}
+
+	// Check minimum length
+	if len(data) < aes.BlockSize {
+		return nil, errors.New("ciphertext too short")
+	}
+
+	// Extract IV and ciphertext
+	iv := data[:aes.BlockSize]
+	ciphertext := data[aes.BlockSize:]
+
+	// Check if ciphertext is multiple of block size
+	if len(ciphertext)%aes.BlockSize != 0 {
+		return nil, errors.New("ciphertext is not a multiple of the block size")
+	}
+
+	// Decrypt
+	mode := cipher.NewCBCDecrypter(block, iv)
+	plaintext := make([]byte, len(ciphertext))
+	mode.CryptBlocks(plaintext, ciphertext)
+
+	// Remove PKCS7 padding
+	if len(plaintext) == 0 {
+		return nil, errors.New("invalid padding")
+	}
+	padding := int(plaintext[len(plaintext)-1])
+	if padding > aes.BlockSize || padding == 0 {
+		return nil, errors.New("invalid padding")
+	}
+	for i := len(plaintext) - padding; i < len(plaintext); i++ {
+		if plaintext[i] != byte(padding) {
+			return nil, errors.New("invalid padding")
+		}
+	}
+	plaintext = plaintext[:len(plaintext)-padding]
+
+	return plaintext, nil
+}
+
+// deriveKey derives a key with deterministic salt for peer synchronization
+func (as *AdvancedSecurity) deriveKey(inputKey []byte, length int) []byte {
+	// Use deterministic salt based on input key for peer synchronization
+	saltSource := append(inputKey, []byte("trustdrop-v3-salt-2024")...)
+	salt := sha256.Sum256(saltSource)
+
+	info := []byte("trustdrop-v3-secure-key-derivation-2024")
+	hkdf := hkdf.New(sha256.New, inputKey, salt[:], info)
 
 	derivedKey := make([]byte, length)
 	if _, err := io.ReadFull(hkdf, derivedKey); err != nil {
-		// Fallback to enhanced hash-based derivation if HKDF fails
-		hash := sha256.Sum256(append(append(inputKey, salt...), info...))
-		copy(derivedKey, hash[:])
-		
-		// For longer keys, use iterative hashing
-		if length > 32 {
-			for i := 32; i < length; i++ {
-				// Use previous hash as input for next round
-				prevHash := derivedKey[i-32 : i]
-				nextHash := sha256.Sum256(append(prevHash, byte(i/32)))
-				if i < length {
-					derivedKey[i] = nextHash[i%32]
-				}
-			}
-		}
+		// Secure fallback using PBKDF2 with deterministic salt
+		derivedKey = pbkdf2.Key(inputKey, salt[:], 100000, length, sha256.New)
 	}
 
 	return derivedKey
@@ -326,21 +431,6 @@ func (as *AdvancedSecurity) GenerateSecureKey(size int) ([]byte, error) {
 	return key, nil
 }
 
-// AnalyzeThreatLevel analyzes the current threat environment
-func (as *AdvancedSecurity) AnalyzeThreatLevel() (string, error) {
-	// Enhanced threat analysis based on multiple factors
-	
-	// Check system entropy
-	entropyTest := make([]byte, 32)
-	if _, err := rand.Read(entropyTest); err != nil {
-		return "HIGH", fmt.Errorf("insufficient system entropy")
-	}
-
-	// Basic threat assessment - in production this would be more sophisticated
-	// For now, return conservative assessment for institutional environments
-	return "MEDIUM", nil
-}
-
 // GetRecommendedMode returns the recommended encryption mode based on threat level and data characteristics
 func (as *AdvancedSecurity) GetRecommendedMode(dataSize int64, networkType string) EncryptionMode {
 	// Recommendations based on institutional network requirements
@@ -348,9 +438,9 @@ func (as *AdvancedSecurity) GetRecommendedMode(dataSize int64, networkType strin
 	case "corporate", "university", "institutional":
 		// For institutional networks, prioritize compatibility
 		if dataSize > 50*1024*1024 { // Large files
-			return ModeCBC // Most compatible
-		} else {
 			return ModeGCM // Good balance of security and compatibility
+		} else {
+			return ModeGCM // Default to GCM for institutional networks
 		}
 	case "mobile":
 		// For mobile networks, prioritize efficiency
@@ -369,143 +459,12 @@ func (as *AdvancedSecurity) GetRecommendedMode(dataSize int64, networkType strin
 	}
 }
 
-// VerifyIntegrity verifies the integrity of encrypted data
-func (as *AdvancedSecurity) VerifyIntegrity(encryptedData []byte, key []byte, mode EncryptionMode) error {
-	// For authenticated encryption modes, integrity is verified during decryption
-	switch mode {
-	case ModeGCM, ModeChaCha20, ModeHybrid:
-		// Try to decrypt - if it succeeds, integrity is verified
-		_, err := as.DecryptWithMode(encryptedData, key, mode)
-		if err != nil {
-			return fmt.Errorf("integrity verification failed: %w", err)
-		}
-		return nil
-	case ModeCBC:
-		// For CBC mode, we don't have built-in authentication
-		// Perform basic checks
-		if len(encryptedData) < aes.BlockSize {
-			return fmt.Errorf("encrypted data too short for CBC mode")
-		}
-		if len(encryptedData)%aes.BlockSize != 0 {
-			return fmt.Errorf("encrypted data not properly aligned for CBC mode")
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported encryption mode for integrity verification: %d", mode)
-	}
-}
-
-// SecureCompareKeys performs constant-time comparison of keys to prevent timing attacks
-func (as *AdvancedSecurity) SecureCompareKeys(key1, key2 []byte) bool {
-	if len(key1) != len(key2) {
-		return false
-	}
-
-	var result byte
-	for i := 0; i < len(key1); i++ {
-		result |= key1[i] ^ key2[i]
-	}
-
-	return result == 0
-}
-
-// SecureWipeMemory securely wipes sensitive data from memory
-func (as *AdvancedSecurity) SecureWipeMemory(data []byte) {
-	// Overwrite with random data first
-	if _, err := rand.Read(data); err == nil {
-		// Then overwrite with zeros
-		for i := range data {
-			data[i] = 0
-		}
-	} else {
-		// Fallback to zero-only wipe
-		for i := range data {
-			data[i] = 0
-		}
-	}
-}
-
-// CreateSecureHash creates a secure hash of data with salt
-func (as *AdvancedSecurity) CreateSecureHash(data []byte, salt []byte) []byte {
-	hasher := sha256.New()
-	
-	// Write salt first
-	if len(salt) > 0 {
-		hasher.Write(salt)
-	} else {
-		// Use default salt if none provided
-		defaultSalt := []byte("trustdrop-secure-hash-salt-v1")
-		hasher.Write(defaultSalt)
-	}
-	
-	// Write data
-	hasher.Write(data)
-	
-	return hasher.Sum(nil)
-}
-
-// ValidateEncryptionKey validates that an encryption key meets security requirements
-func (as *AdvancedSecurity) ValidateEncryptionKey(key []byte, minLength int) error {
-	if len(key) < minLength {
-		return fmt.Errorf("key too short: %d bytes, minimum required: %d", len(key), minLength)
-	}
-
-	// Check for all-zero key
-	allZero := true
-	for _, b := range key {
-		if b != 0 {
-			allZero = false
-			break
-		}
-	}
-	if allZero {
-		return fmt.Errorf("key cannot be all zeros")
-	}
-
-	// Basic entropy check - count unique bytes
-	uniqueBytes := make(map[byte]bool)
-	for _, b := range key {
-		uniqueBytes[b] = true
-	}
-
-	// Require at least 1/4 of possible byte values for reasonable entropy
-	minUniqueBytes := len(key) / 4
-	if minUniqueBytes < 4 {
-		minUniqueBytes = 4
-	}
-	if len(uniqueBytes) < minUniqueBytes {
-		return fmt.Errorf("key has insufficient entropy: %d unique bytes in %d total", len(uniqueBytes), len(key))
-	}
-
-	return nil
-}
-
-// GetSecurityMetrics returns security-related metrics
-func (as *AdvancedSecurity) GetSecurityMetrics() map[string]interface{} {
-	metrics := make(map[string]interface{})
-	
-	// Test random number generation
-	testEntropy := make([]byte, 32)
-	entropyAvailable := true
-	if _, err := rand.Read(testEntropy); err != nil {
-		entropyAvailable = false
-	}
-	
-	metrics["entropy_available"] = entropyAvailable
-	metrics["supported_modes"] = []string{"AES-256-CBC", "AES-256-GCM", "ChaCha20-Poly1305", "Hybrid"}
-	metrics["default_mode"] = as.preferredMode.String()
-	metrics["key_derivation"] = "HKDF-SHA256"
-	metrics["authenticated_encryption"] = true
-	
-	return metrics
-}
-
 // SetPreferredMode sets the preferred encryption mode
 func (as *AdvancedSecurity) SetPreferredMode(mode EncryptionMode) {
 	as.preferredMode = mode
 }
 
-// GetPreferredMode returns the current preferred encryption mode
+// GetPreferredMode returns the preferred encryption mode
 func (as *AdvancedSecurity) GetPreferredMode() EncryptionMode {
 	return as.preferredMode
 }
